@@ -1,0 +1,5 @@
+{
+  "name": "baro",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

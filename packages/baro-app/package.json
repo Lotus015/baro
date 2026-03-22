@@ -1,0 +1,25 @@
+{
+  "name": "@baro-ai/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "baro": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup src/cli.tsx src/core/executor.ts --format esm --external ink --external react --external ink-spinner",
+    "dev": "tsup src/cli.tsx src/core/executor.ts --format esm --external ink --external react --external ink-spinner --watch"
+  },
+  "dependencies": {
+    "ink": "^5.2.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^18.3.1",
+    "zod": "^3.24.0",
+    "zod-to-json-schema": "^3.25.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.2",
+    "typescript": "^5.3.3"
+  }
+}
