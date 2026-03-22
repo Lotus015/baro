@@ -2,46 +2,46 @@
 
 use ratatui::style::Color;
 
-// ─── Modern dark theme with vibrant accents ──────────────────
+// ─── ANSI color theme for maximum terminal compatibility ──────────────────
 
-// Primary palette - electric blue/purple gradient feel
-pub const ACCENT: Color = Color::Rgb(130, 170, 255);      // soft blue
-pub const ACCENT_BRIGHT: Color = Color::Rgb(100, 100, 255); // electric indigo
-pub const ACCENT_DIM: Color = Color::Rgb(80, 100, 180);    // muted blue
+// Primary palette
+pub const ACCENT: Color = Color::LightBlue;
+pub const ACCENT_BRIGHT: Color = Color::LightCyan;
+pub const ACCENT_DIM: Color = Color::Blue;
 
 // Semantic colors
-pub const SUCCESS: Color = Color::Rgb(80, 250, 123);       // neon green
-pub const SUCCESS_DIM: Color = Color::Rgb(50, 160, 80);    // muted green
-pub const WARNING: Color = Color::Rgb(255, 184, 108);      // warm amber
-pub const WARNING_DIM: Color = Color::Rgb(180, 130, 70);   // muted amber
-pub const ERROR: Color = Color::Rgb(255, 85, 85);          // coral red
-pub const ERROR_DIM: Color = Color::Rgb(180, 60, 60);      // muted red
+pub const SUCCESS: Color = Color::Green;
+pub const SUCCESS_DIM: Color = Color::DarkGray;
+pub const WARNING: Color = Color::Yellow;
+pub const WARNING_DIM: Color = Color::DarkGray;
+pub const ERROR: Color = Color::Red;
+pub const ERROR_DIM: Color = Color::DarkGray;
 
 // Text
-pub const TEXT: Color = Color::Rgb(230, 230, 240);         // soft white
-pub const TEXT_DIM: Color = Color::Rgb(160, 160, 180);     // secondary text
-pub const MUTED: Color = Color::Rgb(100, 100, 120);        // subtle gray
+pub const TEXT: Color = Color::White;
+pub const TEXT_DIM: Color = Color::Gray;
+pub const MUTED: Color = Color::DarkGray;
 
 // Structure
-pub const BORDER: Color = Color::Rgb(60, 60, 80);          // subtle border
-pub const BORDER_ACTIVE: Color = Color::Rgb(100, 100, 255); // active panel border
-pub const SURFACE: Color = Color::Rgb(30, 30, 45);         // panel background hint
+pub const BORDER: Color = Color::Gray;
+pub const BORDER_ACTIVE: Color = Color::LightCyan;
+pub const SURFACE: Color = Color::Black;
 
 // Logo / brand
-pub const LOGO_1: Color = Color::Rgb(100, 100, 255);       // gradient start: indigo
-pub const LOGO_2: Color = Color::Rgb(130, 80, 255);        // gradient mid: purple
-pub const LOGO_3: Color = Color::Rgb(170, 60, 255);        // gradient end: violet
-pub const LOGO_GLOW: Color = Color::Rgb(80, 80, 200);      // dim glow version
+pub const LOGO_1: Color = Color::LightBlue;
+pub const LOGO_2: Color = Color::LightMagenta;
+pub const LOGO_3: Color = Color::Magenta;
+pub const LOGO_GLOW: Color = Color::Blue;
 
 // Progress bar
-pub const GAUGE_FG: Color = Color::Rgb(100, 100, 255);     // indigo fill
-pub const GAUGE_BG: Color = Color::Rgb(40, 40, 60);        // dark track
+pub const GAUGE_FG: Color = Color::Green;
+pub const GAUGE_BG: Color = Color::DarkGray;
 
 // Tab colors
-pub const TAB_ACTIVE: Color = Color::Rgb(100, 100, 255);
-pub const TAB_INACTIVE: Color = Color::Rgb(80, 80, 100);
+pub const TAB_ACTIVE: Color = Color::LightCyan;
+pub const TAB_INACTIVE: Color = Color::DarkGray;
 
 // Status-specific
-pub const RUNNING: Color = Color::Rgb(255, 184, 108);      // amber for running
-pub const PENDING: Color = Color::Rgb(80, 80, 100);        // dim for pending
-pub const RETRY: Color = Color::Rgb(255, 200, 50);         // bright yellow for retry
+pub const RUNNING: Color = Color::Yellow;
+pub const PENDING: Color = Color::DarkGray;
+pub const RETRY: Color = Color::LightYellow;
