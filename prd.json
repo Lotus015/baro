@@ -1,0 +1,113 @@
+{
+  "branchName": "fix/tui-ansi-colors-visual-overhaul",
+  "description": "Fix all TUI visual issues by replacing RGB colors with ANSI and improving UI elements",
+  "project": "baro-tui-visual-fixes",
+  "userStories": [
+    {
+      "acceptance": [],
+      "completedAt": "2026-03-22T22:45:05.613524+00:00",
+      "dependsOn": [],
+      "description": "Replace every Color::Rgb constant in crates/baro-tui/src/theme.rs with the nearest ANSI Color variant. ACCENT→LightBlue, ACCENT_BRIGHT→LightCyan, ACCENT_DIM→Blue, SUCCESS→Green, SUCCESS_DIM→DarkGray, WARNING→Yellow, WARNING_DIM→DarkGray, ERROR→Red, ERROR_DIM→DarkGray, TEXT→White, TEXT_DIM→Gray, MUTED→DarkGray, BORDER→Gray, BORDER_ACTIVE→LightCyan, SURFACE→Black, LOGO_1→LightBlue, LOGO_2→LightMagenta, LOGO_3→Magenta, LOGO_GLOW→Blue, GAUGE_FG→Green, GAUGE_BG→DarkGray, TAB_ACTIVE→LightCyan, TAB_INACTIVE→DarkGray, RUNNING→Yellow, PENDING→DarkGray, RETRY→LightYellow. All text should use White or Gray, borders should be Gray, labels White bold.",
+      "durationSecs": 30,
+      "id": "S1",
+      "passes": true,
+      "priority": 1,
+      "retries": 2,
+      "tests": [],
+      "title": "Replace all Color::Rgb with ANSI colors in theme.rs"
+    },
+    {
+      "acceptance": [],
+      "completedAt": "2026-03-22T22:45:46.217421+00:00",
+      "dependsOn": [
+        "S1"
+      ],
+      "description": "In crates/baro-tui/src/screens/execute.rs, update story_list_item() and status_icon_color(): Done=green text with '✓' checkmark, Running=yellow text with '▶' arrow, Pending=DarkGray text with '○' circle, Failed=red with '✗', Retrying=yellow with '↻', Skipped=DarkGray with '⊘'. Replace emoji icons (🔄✅❌etc) with these simple Unicode chars that render reliably in all terminals.",
+      "durationSecs": 40,
+      "id": "S2",
+      "passes": true,
+      "priority": 2,
+      "retries": 2,
+      "tests": [],
+      "title": "Story list visual distinctions with ASCII icons"
+    },
+    {
+      "acceptance": [],
+      "completedAt": "2026-03-22T22:45:30.419070+00:00",
+      "dependsOn": [
+        "S1"
+      ],
+      "description": "In crates/baro-tui/src/screens/planning.rs, the LineGauge for the indeterminate pulsing animation should NOT show any percentage label. Remove any .label() call or percentage display from the LineGauge widget. Keep only the pulsing wave animation. Also replace any remaining Color::Rgb references in planning.rs with theme constants or ANSI colors (the spinner pulse colors LOGO_1/LOGO_2/LOGO_3 are now ANSI via theme.rs).",
+      "durationSecs": 24,
+      "id": "S3",
+      "passes": true,
+      "priority": 3,
+      "retries": 2,
+      "tests": [],
+      "title": "Remove percentage from planning LineGauge"
+    },
+    {
+      "acceptance": [],
+      "completedAt": "2026-03-22T22:47:31.395823+00:00",
+      "dependsOn": [
+        "S2"
+      ],
+      "description": "In crates/baro-tui/src/screens/execute.rs render_stats_full(): 1) In the story table rows, split the files cell so +N is green and ~N is yellow (currently both use one color). Use a Line with two styled Spans in the files column. 2) In the summary section, make all numeric values bright/bold with ANSI colors: completed count bold green, time bold LightBlue, avg bold LightBlue, fastest bold green, slowest bold yellow, files +N bold green and ~N bold yellow, skipped bold red/green, commits bold LightBlue.",
+      "durationSecs": 105,
+      "id": "S4",
+      "passes": true,
+      "priority": 4,
+      "retries": 2,
+      "tests": [],
+      "title": "Stats table files column and summary stats colors"
+    },
+    {
+      "acceptance": [],
+      "completedAt": "2026-03-22T22:46:59.835871+00:00",
+      "dependsOn": [
+        "S2"
+      ],
+      "description": "In crates/baro-tui/src/screens/execute.rs: 1) Ensure progress bar (render_progress) uses green gauge style (theme::GAUGE_FG is now Green from S1). 2) Fix Duration bar chart: bar_style should use Color::Cyan or Color::LightCyan so bars are visible against dark background. value_style should be White bold, label_style should be Gray. 3) Remove or simplify the Parallelism sparkline section entirely - remove the has_sparkline check, the sparkline constraint, and the sparkline rendering code. It's confusing when max parallelism is 1. Remove the sparkline import if no longer used.",
+      "durationSecs": 73,
+      "id": "S5",
+      "passes": true,
+      "priority": 5,
+      "retries": 2,
+      "tests": [],
+      "title": "Progress bar green, bar chart ANSI, remove sparkline"
+    },
+    {
+      "acceptance": [],
+      "completedAt": "2026-03-22T22:49:13.602118+00:00",
+      "dependsOn": [
+        "S2"
+      ],
+      "description": "When app.done is true on the execute screen, render a completion overlay/screen instead of the normal dashboard. In crates/baro-tui/src/screens/execute.rs, modify the render() function: if app.done, call a new render_completion() function. This should show: 1) A centered success banner ('ALL STORIES COMPLETE' in bold green), 2) Summary stats below it: total stories, completed, skipped, total time, files created/modified - using bright ANSI colors, 3) Keybind hint at bottom: 'q quit' in the standard style. Use Block with borders and center the content. Keep it simple - just a Paragraph in a centered box, similar to the planning screen layout pattern.",
+      "durationSecs": 207,
+      "id": "S6",
+      "passes": true,
+      "priority": 6,
+      "retries": 2,
+      "tests": [],
+      "title": "Add completion screen when all stories finish"
+    },
+    {
+      "acceptance": [],
+      "completedAt": "2026-03-22T22:51:44.430382+00:00",
+      "dependsOn": [
+        "S3",
+        "S4",
+        "S5",
+        "S6"
+      ],
+      "description": "Do a final pass across ALL screen files (welcome.rs, planning.rs, review.rs, execute.rs) to ensure: 1) All regular text uses Color::White or theme::TEXT (now White). 2) All secondary/dim text uses Color::Gray or theme::TEXT_DIM (now Gray). 3) All borders use Color::Gray or theme::BORDER (now Gray). 4) All section title labels use Color::White with Modifier::BOLD. 5) No Color::Rgb values remain anywhere in the crates/baro-tui/src/ directory. Run grep to verify. Fix any remaining inconsistencies.",
+      "durationSecs": 150,
+      "id": "S7",
+      "passes": true,
+      "priority": 7,
+      "retries": 2,
+      "tests": [],
+      "title": "Final audit: all text White/Gray, borders Gray, labels bold White"
+    }
+  ]
+}
