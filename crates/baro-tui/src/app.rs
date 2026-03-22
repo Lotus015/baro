@@ -86,6 +86,7 @@ pub struct ActiveStory {
 
 #[derive(Debug, Clone)]
 pub struct ReviewStory {
+    pub id: String,
     pub title: String,
     pub description: String,
     pub depends_on: Vec<String>,
@@ -101,8 +102,10 @@ pub struct App {
 
     // Planning screen
     pub planning_start: Option<Instant>,
+    pub planning_error: Option<String>,
 
     // Review screen
+    pub branch_name: String,
     pub review_stories: Vec<ReviewStory>,
     pub review_scroll: usize,
 
@@ -135,7 +138,9 @@ impl App {
             goal_input: String::new(),
 
             planning_start: None,
+            planning_error: None,
 
+            branch_name: String::new(),
             review_stories: Vec::new(),
             review_scroll: 0,
 

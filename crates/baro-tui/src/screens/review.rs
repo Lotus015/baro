@@ -75,7 +75,7 @@ pub fn render(f: &mut Frame, app: &App) {
             lines.push(Line::from(vec![
                 Span::styled(format!(" {} ", marker), marker_style),
                 Span::styled(
-                    format!("S{}: ", i + 1),
+                    format!("{}: ", story.id),
                     Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(&story.title, title_style),

@@ -70,14 +70,22 @@ pub fn render(f: &mut Frame, app: &App) {
     ]));
     f.render_widget(goal, center(chunks[2], 70));
 
-    // Elapsed
-    let elapsed = app.planning_elapsed_secs();
-    let elapsed_text = Paragraph::new(Line::from(vec![
-        Span::styled("Elapsed: ", Style::default().fg(theme::MUTED)),
-        Span::styled(
-            format!("{}:{:02}", elapsed / 60, elapsed % 60),
-            Style::default().fg(theme::ACCENT),
-        ),
-    ]));
-    f.render_widget(elapsed_text, center(chunks[3], 20));
+    // Elapsed or error
+    if let Some(ref err) = app.planning_error {
+        let error_text = Paragraph::new(Line::from(vec![
+            Span::styled("Error: ", Style::default().fg(theme::ERROR).add_modifier(Modifier::BOLD)),
+            Span::styled(err.as_str(), Style::default().fg(theme::ERROR)),
+        ]));
+        f.render_widget(error_text, center(chunks[3], 70));
+    } else {
+        let elapsed = app.planning_elapsed_secs();
+        let elapsed_text = Paragraph::new(Line::from(vec![
+            Span::styled("Elapsed: ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{}:{:02}", elapsed / 60, elapsed % 60),
+                Style::default().fg(theme::ACCENT),
+            ),
+        ]));
+        f.render_widget(elapsed_text, center(chunks[3], 20));
+    }
 }
