@@ -538,8 +538,17 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  Files: ", Style::default().fg(theme::MUTED)),
             Span::styled(
-                format!("+{} ~{}", total_files_created, total_files_modified),
-                Style::default().fg(theme::ACCENT),
+                format!("+{}", total_files_created),
+                Style::default()
+                    .fg(theme::SUCCESS)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ", Style::default()),
+            Span::styled(
+                format!("~{}", total_files_modified),
+                Style::default()
+                    .fg(theme::WARNING)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("    ", Style::default()),
             Span::styled("Skipped: ", Style::default().fg(theme::MUTED)),
@@ -548,13 +557,15 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
                     "{}",
                     final_stats.map(|s| s.stories_skipped).unwrap_or(0)
                 ),
-                Style::default().fg(
-                    if final_stats.map(|s| s.stories_skipped).unwrap_or(0) > 0 {
-                        theme::ERROR
-                    } else {
-                        theme::SUCCESS
-                    },
-                ),
+                Style::default()
+                    .fg(
+                        if final_stats.map(|s| s.stories_skipped).unwrap_or(0) > 0 {
+                            theme::ERROR
+                        } else {
+                            theme::SUCCESS
+                        },
+                    )
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("    ", Style::default()),
             Span::styled("Commits: ", Style::default().fg(theme::MUTED)),
@@ -565,7 +576,9 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
                         .map(|s| s.total_commits)
                         .unwrap_or(app.completed)
                 ),
-                Style::default().fg(theme::ACCENT),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
     ];
@@ -658,10 +671,20 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
                     "-".to_string()
                 });
 
-            let files = if s.files_created > 0 || s.files_modified > 0 {
-                format!("+{} ~{}", s.files_created, s.files_modified)
+            let files_cell = if s.files_created > 0 || s.files_modified > 0 {
+                Cell::from(Line::from(vec![
+                    Span::styled(
+                        format!("+{}", s.files_created),
+                        Style::default().fg(theme::SUCCESS),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("~{}", s.files_modified),
+                        Style::default().fg(theme::WARNING),
+                    ),
+                ]))
             } else {
-                "-".to_string()
+                Cell::from("-")
             };
 
             let deps = if s.depends_on.is_empty() {
@@ -671,12 +694,12 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
             };
 
             Row::new(vec![
-                format!("  {}", s.id),
-                s.title.clone(),
-                status_str.to_string(),
-                time,
-                files,
-                deps,
+                Cell::from(format!("  {}", s.id)),
+                Cell::from(s.title.clone()),
+                Cell::from(status_str.to_string()),
+                Cell::from(time),
+                files_cell,
+                Cell::from(deps),
             ])
             .style(Style::default().fg(color))
         })
