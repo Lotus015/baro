@@ -1,13 +1,19 @@
 {
   "name": "@baro-ai/cli",
   "version": "0.1.0",
+  "description": "Autonomous parallel coding - plan and execute with AI",
   "type": "module",
   "bin": {
     "baro": "./dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "bin/",
+    "scripts/postinstall.js"
+  ],
   "scripts": {
     "build": "tsup src/cli.tsx src/core/executor.ts --format esm --external ink --external react --external ink-spinner",
-    "dev": "tsup src/cli.tsx src/core/executor.ts --format esm --external ink --external react --external ink-spinner --watch"
+    "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "ink": "^5.2.0",
@@ -21,5 +27,11 @@
     "@types/node": "^22.0.0",
     "tsup": "^8.0.2",
     "typescript": "^5.3.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lotus015/baro"
+  },
+  "keywords": ["ai", "coding", "cli", "parallel", "autonomous", "claude"],
+  "license": "MIT"
 }
