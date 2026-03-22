@@ -163,12 +163,12 @@ fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
 
 fn story_list_item(story: &crate::app::StoryState) -> ListItem<'static> {
     let (icon, style) = match &story.status {
-        StoryStatus::Complete => ("\u{2705}", Style::default().fg(theme::SUCCESS)),
-        StoryStatus::Running => ("\u{1f504}", Style::default().fg(theme::WARNING)),
-        StoryStatus::Failed => ("\u{274c}", Style::default().fg(theme::ERROR)),
-        StoryStatus::Retrying(_) => ("\u{1f501}", Style::default().fg(theme::WARNING)),
-        StoryStatus::Skipped => ("\u{23ed}\u{fe0f}", Style::default().fg(theme::MUTED)),
-        StoryStatus::Pending => ("\u{23f8}\u{fe0f}", Style::default().fg(theme::MUTED)),
+        StoryStatus::Complete => ("✓", Style::default().fg(theme::SUCCESS)),
+        StoryStatus::Running => ("▶", Style::default().fg(theme::WARNING)),
+        StoryStatus::Failed => ("✗", Style::default().fg(theme::ERROR)),
+        StoryStatus::Retrying(_) => ("↻", Style::default().fg(theme::WARNING)),
+        StoryStatus::Skipped => ("⊘", Style::default().fg(theme::MUTED)),
+        StoryStatus::Pending => ("○", Style::default().fg(theme::MUTED)),
     };
 
     let duration = story
@@ -791,11 +791,11 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
 
 fn status_icon_color(status: &StoryStatus) -> (&'static str, ratatui::style::Color) {
     match status {
-        StoryStatus::Complete => ("\u{2705}", theme::SUCCESS),
-        StoryStatus::Running => ("\u{1f504}", theme::WARNING),
-        StoryStatus::Failed => ("\u{274c}", theme::ERROR),
-        StoryStatus::Retrying(_) => ("\u{1f501}", theme::WARNING),
-        StoryStatus::Skipped => ("\u{23ed}\u{fe0f}", theme::MUTED),
-        StoryStatus::Pending => ("\u{23f8}\u{fe0f}", theme::MUTED),
+        StoryStatus::Complete => ("✓", theme::SUCCESS),
+        StoryStatus::Running => ("▶", theme::WARNING),
+        StoryStatus::Failed => ("✗", theme::ERROR),
+        StoryStatus::Retrying(_) => ("↻", theme::WARNING),
+        StoryStatus::Skipped => ("⊘", theme::MUTED),
+        StoryStatus::Pending => ("○", theme::MUTED),
     }
 }
