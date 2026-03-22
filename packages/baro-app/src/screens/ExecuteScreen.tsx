@@ -1,38 +1,66 @@
 import React, { useEffect } from "react"
 import { Box, Text, useApp } from "ink"
-import { spawn } from "child_process"
+import { spawn, execSync } from "child_process"
+import * as fs from "fs"
 import * as path from "path"
+import { fileURLToPath } from "url"
 
 interface Props {
     prd: any
     onDone: () => void
 }
 
+function findBinary(name: string, searchFrom: string): string | null {
+    // 1. bin/ next to dist/ (published npm package layout)
+    const pkgBin = path.resolve(searchFrom, "..", "bin", name)
+    if (existsExec(pkgBin)) return pkgBin
+
+    // 2. Cargo target (local dev - walk up to find Cargo.toml)
+    let dir = searchFrom
+    for (let i = 0; i < 10; i++) {
+        const cargoTarget = path.join(dir, "target", "release", name)
+        if (existsExec(cargoTarget)) return cargoTarget
+        const parent = path.dirname(dir)
+        if (parent === dir) break
+        dir = parent
+    }
+
+    // 3. In PATH
+    try {
+        const which = execSync(`which ${name}`, { encoding: "utf-8" }).trim()
+        if (which) return which
+    } catch {}
+
+    return null
+}
+
+function existsExec(p: string): boolean {
+    try {
+        fs.accessSync(p, fs.constants.X_OK)
+        return true
+    } catch {
+        return false
+    }
+}
+
 export function ExecuteScreen({ prd, onDone }: Props) {
     const app = useApp()
 
     useEffect(() => {
-        // Exit Ink, then launch ratatui TUI
-        // Small delay to let Ink cleanup
         setTimeout(() => {
             app.exit()
 
-            // Find baro-tui binary
-            const appDir = path.dirname(new URL(import.meta.url).pathname)
-            const possiblePaths = [
-                path.join(appDir, "..", "..", "..", "crates", "baro-tui", "target", "release", "baro-tui"),
-                path.join(appDir, "..", "bin", "baro-tui"),
-                "baro-tui", // in PATH
-            ]
+            const thisDir = path.dirname(fileURLToPath(import.meta.url))
+            const executorPath = path.join(thisDir, "core", "executor.js")
+            const tuiBinary = findBinary("baro-tui", thisDir)
 
-            // Find executor
-            const executorPath = path.join(appDir, "core", "executor.js")
+            if (!tuiBinary) {
+                console.error("\nError: baro-tui binary not found.")
+                console.error("Build it: cd <baro-repo> && cargo build --release")
+                console.error("Or install: npm install -g @baro-ai/cli\n")
+                process.exit(1)
+            }
 
-            const tuiBinary = possiblePaths.find((p) => {
-                try { require("fs").accessSync(p); return true } catch { return false }
-            }) ?? possiblePaths[possiblePaths.length - 1]
-
-            // Spawn: node executor.js | baro-tui
             const executor = spawn("node", [executorPath], {
                 cwd: process.cwd(),
                 stdio: ["ignore", "pipe", "inherit"],
@@ -44,11 +72,12 @@ export function ExecuteScreen({ prd, onDone }: Props) {
                 stdio: [executor.stdout, "inherit", "inherit"],
             })
 
-            tui.on("close", () => process.exit(0))
-            executor.on("close", () => {
-                // Give TUI a moment to process remaining events
-                setTimeout(() => {}, 1000)
+            tui.on("error", (err) => {
+                console.error("\nFailed to start baro-tui:", err.message)
+                process.exit(1)
             })
+
+            tui.on("close", () => process.exit(0))
         }, 100)
     }, [app])
 
