@@ -1,15 +1,29 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
 use crate::app::App;
 use crate::theme;
 
-const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_FRAMES: &[&str] = &[
+    "\u{28cb}", "\u{28d9}", "\u{28f9}", "\u{28f8}", "\u{28fc}",
+    "\u{28f4}", "\u{28e6}", "\u{28e7}", "\u{28c7}", "\u{28cf}",
+];
+
+// Pulsing dots animation
+fn dots(tick: u64) -> &'static str {
+    match (tick / 4) % 4 {
+        0 => "",
+        1 => ".",
+        2 => "..",
+        3 => "...",
+        _ => "",
+    }
+}
 
 pub fn render(f: &mut Frame, app: &App) {
     let area = f.area();
@@ -17,11 +31,11 @@ pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(35),
-            Constraint::Length(3),  // Spinner + status
-            Constraint::Length(2),  // Goal
-            Constraint::Length(2),  // Elapsed
-            Constraint::Min(0),
+            Constraint::Min(2),
+            Constraint::Length(7),   // Central box
+            Constraint::Length(2),   // Spacer
+            Constraint::Length(1),   // Hint
+            Constraint::Min(1),
         ])
         .split(area);
 
@@ -31,61 +45,120 @@ pub fn render(f: &mut Frame, app: &App) {
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Length(pad),
-                Constraint::Length(width),
+                Constraint::Length(width.min(area.width)),
                 Constraint::Min(0),
             ])
             .split(area)[1]
     };
 
-    // Spinner
-    let frame_idx = (app.tick_count / 2) as usize % SPINNER_FRAMES.len();
-    let spinner = SPINNER_FRAMES[frame_idx];
+    let box_width = 50.min(area.width.saturating_sub(4));
+    let box_area = center(chunks[1], box_width);
 
     let planner_name = match app.planner {
         crate::app::Planner::Claude => "Claude",
         crate::app::Planner::OpenAI => "OpenAI",
     };
 
-    let status = Paragraph::new(Line::from(vec![
-        Span::styled(
-            format!(" {} ", spinner),
-            Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("Planning with {}...", planner_name),
-            Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
-        ),
-    ]));
-    f.render_widget(status, center(chunks[1], 40));
-
-    // Goal
-    let goal_display = if app.goal_input.len() > 60 {
-        format!("{}...", &app.goal_input[..57])
-    } else {
-        app.goal_input.clone()
-    };
-    let goal = Paragraph::new(Line::from(vec![
-        Span::styled("Goal: ", Style::default().fg(theme::MUTED)),
-        Span::styled(goal_display, Style::default().fg(theme::TEXT_DIM)),
-    ]));
-    f.render_widget(goal, center(chunks[2], 70));
-
-    // Elapsed or error
     if let Some(ref err) = app.planning_error {
-        let error_text = Paragraph::new(Line::from(vec![
-            Span::styled("Error: ", Style::default().fg(theme::ERROR).add_modifier(Modifier::BOLD)),
-            Span::styled(err.as_str(), Style::default().fg(theme::ERROR)),
-        ]));
-        f.render_widget(error_text, center(chunks[3], 70));
+        // Error state
+        let lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    " \u{2716} ",
+                    Style::default().fg(theme::ERROR).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Planning failed",
+                    Style::default().fg(theme::ERROR).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                format!(" {}", if err.len() > 44 { &err[..44] } else { err }),
+                Style::default().fg(theme::TEXT_DIM),
+            )),
+        ];
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::ERROR_DIM))
+            .title(Span::styled(
+                format!(" {} ", planner_name),
+                Style::default().fg(theme::ERROR).add_modifier(Modifier::BOLD),
+            ));
+
+        let p = Paragraph::new(lines).block(block);
+        f.render_widget(p, box_area);
+
+        let hint = Paragraph::new(Line::from(vec![
+            Span::styled("q", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(" quit", Style::default().fg(theme::MUTED)),
+        ]))
+        .alignment(Alignment::Center);
+        f.render_widget(hint, chunks[3]);
     } else {
+        // Planning in progress
+        let frame_idx = (app.tick_count / 2) as usize % SPINNER_FRAMES.len();
+        let spinner = SPINNER_FRAMES[frame_idx];
         let elapsed = app.planning_elapsed_secs();
-        let elapsed_text = Paragraph::new(Line::from(vec![
-            Span::styled("Elapsed: ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                format!("{}:{:02}", elapsed / 60, elapsed % 60),
-                Style::default().fg(theme::ACCENT),
-            ),
-        ]));
-        f.render_widget(elapsed_text, center(chunks[3], 20));
+
+        let goal_display = if app.goal_input.len() > 42 {
+            format!("{}...", &app.goal_input[..39])
+        } else {
+            app.goal_input.clone()
+        };
+
+        // Pulse color on the spinner
+        let spin_color = match (app.tick_count / 5) % 3 {
+            0 => theme::LOGO_1,
+            1 => theme::LOGO_2,
+            _ => theme::LOGO_3,
+        };
+
+        let lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} ", spinner),
+                    Style::default().fg(spin_color).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("Planning with {}{}", planner_name, dots(app.tick_count)),
+                    Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
+                Span::styled(&goal_display, Style::default().fg(theme::TEXT_DIM)),
+            ]),
+            Line::from(vec![
+                Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
+                Span::styled(
+                    format!("{}:{:02} elapsed", elapsed / 60, elapsed % 60),
+                    Style::default().fg(theme::MUTED),
+                ),
+            ]),
+        ];
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::ACCENT_DIM))
+            .title(Span::styled(
+                format!(" {} ", planner_name),
+                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+            ));
+
+        let p = Paragraph::new(lines).block(block);
+        f.render_widget(p, box_area);
+
+        // Hint
+        let hint = Paragraph::new(Line::from(vec![
+            Span::styled("Esc", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(" cancel", Style::default().fg(theme::MUTED)),
+        ]))
+        .alignment(Alignment::Center);
+        f.render_widget(hint, chunks[3]);
     }
 }
