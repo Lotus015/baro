@@ -82,9 +82,12 @@ jobs:
           npm install
           npx tsup src/core/openai-planner.ts --format esm
 
-      - name: Clean bin directory before publish
+      - name: Reset bin/baro to placeholder before publish
         working-directory: packages/baro-app
-        run: rm -f bin/baro bin/baro-tui bin/baro-native
+        run: |
+          printf '#!/usr/bin/env sh\necho "baro: binary not yet installed. Run: npm rebuild baro-ai" >&2\nexit 1\n' > bin/baro
+          chmod +x bin/baro
+          rm -f bin/baro-tui bin/baro-native
 
       - name: Publish to npm
         working-directory: packages/baro-app
