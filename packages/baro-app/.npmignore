@@ -1,6 +1,0 @@
-src/
-node_modules/
-*.ts
-tsconfig.json
-bin/baro-native
-bin/baro-tui

@@ -12,8 +12,7 @@ import * as https from "https"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PACKAGE_ROOT = path.resolve(__dirname, "..")
 const BIN_DIR = path.join(PACKAGE_ROOT, "bin")
-const BINARY_NAME = "baro-native"
-const RELEASE_NAME = "baro"
+const BINARY_NAME = "baro"
 const REPO = "Lotus015/baro"
 
 function getPlatformKey() {
@@ -65,14 +64,10 @@ async function download(url, dest) {
 
 async function main() {
     const binaryPath = path.join(BIN_DIR, BINARY_NAME)
-    if (fs.existsSync(binaryPath)) {
-        return
-    }
-
     const platformKey = getPlatformKey()
     const version = getVersion()
 
-    const url = `https://github.com/${REPO}/releases/download/v${version}/${RELEASE_NAME}-${platformKey}`
+    const url = `https://github.com/${REPO}/releases/download/v${version}/${BINARY_NAME}-${platformKey}`
 
     console.log(`Downloading baro for ${platformKey}...`)
 
