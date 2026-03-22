@@ -2,31 +2,44 @@ import React, { useState, useCallback } from "react"
 import { Box, Text, useInput } from "ink"
 import Spinner from "ink-spinner"
 import { Planner } from "../core/planner.js"
+import { ClaudePlanner } from "../core/claude-planner.js"
 import type { PrdV2 } from "../core/prd.js"
+import type { PlannerMode } from "../App.js"
 
 interface Props {
+    plannerMode: PlannerMode
     onPlanReady: (prd: PrdV2) => void
     onQuit: () => void
 }
 
-export function PlanScreen({ onPlanReady, onQuit }: Props) {
+export function PlanScreen({ plannerMode, onPlanReady, onQuit }: Props) {
     const [input, setInput] = useState("")
     const [loading, setLoading] = useState(false)
     const [tokenCount, setTokenCount] = useState(0)
     const [toolCalls, setToolCalls] = useState<string[]>([])
     const [error, setError] = useState("")
-    const [planner] = useState(() => new Planner({
-        cwd: process.cwd(),
-        onToken: () => setTokenCount((c) => c + 1),
-        onToolCall: (name, args) => {
-            let label = name
-            if (name === "read_file") label = `Reading ${args?.path ?? "..."}`
-            else if (name === "grep") label = `Searching for "${args?.pattern ?? "..."}"`
-            else if (name === "list_files") label = `Listing ${args?.path || "root"}`
-            else if (name === "file_tree") label = "Scanning project structure"
-            setToolCalls((prev) => [...prev.slice(-8), label])
-        },
-    }))
+    const [planner] = useState(() => {
+        if (plannerMode === "openai") {
+            return new Planner({
+                cwd: process.cwd(),
+                onToken: () => setTokenCount((c) => c + 1),
+                onToolCall: (name: string, args: any) => {
+                    let label = name
+                    if (name === "read_file") label = `Reading ${args?.path ?? "..."}`
+                    else if (name === "grep") label = `Searching for "${args?.pattern ?? "..."}"`
+                    else if (name === "list_files") label = `Listing ${args?.path || "root"}`
+                    else if (name === "file_tree") label = "Scanning project structure"
+                    setToolCalls((prev) => [...prev.slice(-8), label])
+                },
+            })
+        }
+        return new ClaudePlanner({
+            cwd: process.cwd(),
+            onLog: (line: string) => {
+                setToolCalls((prev) => [...prev.slice(-8), line.slice(0, 80)])
+            },
+        })
+    })
 
     const submit = useCallback(async () => {
         const goal = input.trim()
