@@ -1,37 +1,70 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
 use crate::app::App;
-use crate::theme;
 
-// Big ASCII art logo - each line is a row
+// Massive C64-style blocky logo using full block characters
+// Each letter is 8 chars wide, 7 rows tall
 const LOGO: &[&str] = &[
-    " ____    _    ____   ___  ",
-    "| __ )  / \\  |  _ \\ / _ \\ ",
-    "|  _ \\ / _ \\ | |_) | | | |",
-    "| |_) / ___ \\|  _ <| |_| |",
-    "|____/_/   \\_\\_| \\_\\\\___/ ",
+    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
+    " \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}    \u{2588}\u{2588} ",
+    " \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}    \u{2588}\u{2588} ",
+    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}    \u{2588}\u{2588} ",
+    " \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}\u{2580}  \u{2588}\u{2588}  \u{2588}\u{2588}    \u{2588}\u{2588} ",
+    " \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}    \u{2588}\u{2588} ",
+    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
 ];
 
-// Gradient colors for logo rows (indigo -> purple -> violet)
-fn logo_color(row: usize, tick: u64) -> ratatui::style::Color {
-    // Subtle shifting gradient based on tick
-    let phase = ((tick / 3) % 5) as usize;
-    let idx = (row + phase) % 5;
+// C64-inspired bright color palette - animated rainbow cycle
+fn logo_color(row: usize, col: usize, tick: u64) -> Color {
+    let phase = (tick / 2) as usize;
+    let idx = (row + col / 4 + phase) % 8;
     match idx {
-        0 => ratatui::style::Color::Rgb(90, 90, 255),
-        1 => ratatui::style::Color::Rgb(110, 80, 255),
-        2 => ratatui::style::Color::Rgb(140, 65, 255),
-        3 => ratatui::style::Color::Rgb(170, 55, 255),
-        4 => ratatui::style::Color::Rgb(130, 70, 255),
-        _ => theme::LOGO_1,
+        0 => Color::Rgb(100, 100, 255), // blue
+        1 => Color::Rgb(140, 80, 255),  // purple
+        2 => Color::Rgb(200, 60, 255),  // magenta
+        3 => Color::Rgb(255, 80, 180),  // pink
+        4 => Color::Rgb(255, 120, 80),  // orange
+        5 => Color::Rgb(255, 200, 50),  // yellow
+        6 => Color::Rgb(80, 255, 120),  // green
+        7 => Color::Rgb(80, 200, 255),  // cyan
+        _ => Color::White,
     }
 }
+
+// Per-character colored line for the logo
+fn colored_logo_line<'a>(line: &'a str, row: usize, tick: u64) -> Line<'a> {
+    let spans: Vec<Span> = line
+        .char_indices()
+        .map(|(i, ch)| {
+            let color = if ch == ' ' {
+                Color::Reset
+            } else {
+                logo_color(row, i, tick)
+            };
+            Span::styled(
+                &line[i..i + ch.len_utf8()],
+                Style::default()
+                    .fg(color)
+                    .add_modifier(Modifier::BOLD),
+            )
+        })
+        .collect();
+    Line::from(spans)
+}
+
+// Bright white with full intensity
+const BRIGHT_WHITE: Color = Color::Rgb(255, 255, 255);
+const SOFT_WHITE: Color = Color::Rgb(220, 220, 230);
+const LIGHT_BLUE: Color = Color::Rgb(150, 180, 255);
+const BRIGHT_CYAN: Color = Color::Rgb(80, 220, 255);
+const BRIGHT_GREEN: Color = Color::Rgb(80, 255, 160);
+const DIM_BLUE: Color = Color::Rgb(60, 80, 140);
 
 pub fn render(f: &mut Frame, app: &App) {
     let area = f.area();
@@ -40,11 +73,12 @@ pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(2),        // Top padding (flexible)
-            Constraint::Length(5),      // ASCII logo
+            Constraint::Min(1),        // Top padding
+            Constraint::Length(7),      // Logo (7 rows)
+            Constraint::Length(1),      // Spacer
             Constraint::Length(1),      // Tagline
             Constraint::Length(1),      // Spacer
-            Constraint::Length(1),      // Dim separator line
+            Constraint::Length(1),      // Separator
             Constraint::Length(1),      // Spacer
             Constraint::Length(3),      // Goal input
             Constraint::Length(1),      // Spacer
@@ -68,62 +102,68 @@ pub fn render(f: &mut Frame, app: &App) {
             .split(area)[1]
     };
 
-    // ── ASCII Logo with animated gradient ──
+    // ── Massive C64 logo with per-character rainbow animation ──
     let logo_lines: Vec<Line> = LOGO
         .iter()
         .enumerate()
-        .map(|(i, line)| {
-            Line::from(Span::styled(
-                *line,
-                Style::default()
-                    .fg(logo_color(i, app.tick_count))
-                    .add_modifier(Modifier::BOLD),
-            ))
-        })
+        .map(|(i, line)| colored_logo_line(line, i, app.tick_count))
         .collect();
 
     let logo = Paragraph::new(logo_lines).alignment(Alignment::Center);
     f.render_widget(logo, chunks[1]);
 
-    // ── Tagline ──
+    // ── Tagline - bright and punchy ──
     let tagline = Paragraph::new(Line::from(vec![
-        Span::styled("autonomous ", Style::default().fg(theme::MUTED)),
-        Span::styled("parallel ", Style::default().fg(theme::ACCENT_DIM)),
-        Span::styled("coding", Style::default().fg(theme::MUTED)),
+        Span::styled(
+            "autonomous ",
+            Style::default().fg(BRIGHT_CYAN),
+        ),
+        Span::styled(
+            "parallel ",
+            Style::default()
+                .fg(BRIGHT_WHITE)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "coding",
+            Style::default().fg(BRIGHT_CYAN),
+        ),
     ]))
     .alignment(Alignment::Center);
-    f.render_widget(tagline, chunks[2]);
+    f.render_widget(tagline, chunks[3]);
 
-    // ── Separator ──
-    let sep_width = 40.min(w.saturating_sub(4));
-    let sep_str: String = std::iter::repeat_n('\u{2500}', sep_width as usize).collect();
+    // ── Separator - bright line ──
+    let sep_width = 50.min(w.saturating_sub(4));
+    let sep_str: String = std::iter::repeat_n('\u{2550}', sep_width as usize).collect();
     let separator = Paragraph::new(Line::from(Span::styled(
         sep_str,
-        Style::default().fg(theme::BORDER),
+        Style::default().fg(DIM_BLUE),
     )))
     .alignment(Alignment::Center);
-    f.render_widget(separator, chunks[4]);
+    f.render_widget(separator, chunks[5]);
 
-    // ── Goal input ──
-    let input_width = 64.min(w.saturating_sub(4));
-    let input_area = center(chunks[6], input_width);
+    // ── Goal input - bright white borders ──
+    let input_width = 70.min(w.saturating_sub(4));
+    let input_area = center(chunks[7], input_width);
 
     let display_text = if app.goal_input.is_empty() {
         Line::from(Span::styled(
             " Describe what you want to build...",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(LIGHT_BLUE),
         ))
     } else {
         Line::from(Span::styled(
             format!(" {}", &app.goal_input),
-            Style::default().fg(theme::TEXT),
+            Style::default()
+                .fg(BRIGHT_WHITE)
+                .add_modifier(Modifier::BOLD),
         ))
     };
 
     let border_color = if app.goal_input.is_empty() {
-        theme::BORDER
+        LIGHT_BLUE
     } else {
-        theme::ACCENT
+        BRIGHT_WHITE
     };
 
     let input = Paragraph::new(display_text).block(
@@ -133,7 +173,7 @@ pub fn render(f: &mut Frame, app: &App) {
             .title(Span::styled(
                 " Goal ",
                 Style::default()
-                    .fg(theme::ACCENT)
+                    .fg(BRIGHT_WHITE)
                     .add_modifier(Modifier::BOLD),
             )),
     );
@@ -146,78 +186,86 @@ pub fn render(f: &mut Frame, app: &App) {
         f.set_cursor_position((cursor_x, cursor_y));
     }
 
-    // ── Planner selector (pill-style toggle) ──
-    let planner_area = center(chunks[8], input_width);
-
+    // ── Planner selector - bright white with colored active state ──
+    let planner_area = center(chunks[9], input_width);
     let is_claude = app.planner == crate::app::Planner::Claude;
+
+    // Active planner gets a bright animated color
+    let active_color = match (app.tick_count / 6) % 3 {
+        0 => Color::Rgb(100, 200, 255),
+        1 => Color::Rgb(150, 150, 255),
+        _ => Color::Rgb(200, 130, 255),
+    };
 
     let claude_style = if is_claude {
         Style::default()
-            .fg(theme::ACCENT)
+            .fg(active_color)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(SOFT_WHITE)
     };
     let openai_style = if !is_claude {
         Style::default()
-            .fg(theme::ACCENT)
+            .fg(active_color)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(SOFT_WHITE)
     };
 
-    let claude_marker = if is_claude { "\u{25c9}" } else { "\u{25cb}" }; // ◉ vs ○
+    let claude_marker = if is_claude { "\u{25c9}" } else { "\u{25cb}" };
     let openai_marker = if !is_claude { "\u{25c9}" } else { "\u{25cb}" };
 
     let planner = Paragraph::new(Line::from(vec![
         Span::styled("  ", Style::default()),
         Span::styled(format!("{} ", claude_marker), claude_style),
         Span::styled("Claude", claude_style),
-        Span::styled("     ", Style::default()),
+        Span::styled("        ", Style::default()),
         Span::styled(format!("{} ", openai_marker), openai_style),
         Span::styled("OpenAI", openai_style),
-        Span::styled("           ", Style::default()),
+        Span::styled("              ", Style::default()),
         Span::styled(
             "\u{2190}\u{2192} switch",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(SOFT_WHITE),
         ),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(LIGHT_BLUE))
             .title(Span::styled(
                 " Planner ",
-                Style::default().fg(theme::TEXT_DIM),
+                Style::default()
+                    .fg(BRIGHT_WHITE)
+                    .add_modifier(Modifier::BOLD),
             )),
     );
     f.render_widget(planner, planner_area);
 
-    // ── Keybinds ──
+    // ── Keybinds - bright ──
     let help = Paragraph::new(Line::from(vec![
         Span::styled(
             "Enter",
             Style::default()
-                .fg(theme::ACCENT)
+                .fg(BRIGHT_GREEN)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" start   ", Style::default().fg(theme::MUTED)),
+        Span::styled(" start   ", Style::default().fg(SOFT_WHITE)),
         Span::styled(
             "Esc",
             Style::default()
-                .fg(theme::ACCENT)
+                .fg(Color::Rgb(255, 100, 100))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" quit", Style::default().fg(theme::MUTED)),
+        Span::styled(" quit", Style::default().fg(SOFT_WHITE)),
     ]))
     .alignment(Alignment::Center);
-    f.render_widget(help, chunks[10]);
+    f.render_widget(help, chunks[11]);
 
     // ── Version ──
     let version = Paragraph::new(Line::from(Span::styled(
-        "v0.3.0",
-        Style::default().fg(theme::BORDER),
+        "v0.3.5",
+        Style::default().fg(DIM_BLUE),
     )))
     .alignment(Alignment::Center);
-    f.render_widget(version, chunks[11]);
+    f.render_widget(version, chunks[12]);
 }
