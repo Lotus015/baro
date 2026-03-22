@@ -84,6 +84,6 @@ jobs:
 
       - name: Publish to npm
         working-directory: packages/baro-app
-        run: npm publish --access public
+        run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

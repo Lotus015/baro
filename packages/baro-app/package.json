@@ -1,5 +1,5 @@
 {
-  "name": "@baro-ai/cli",
+  "name": "baro-ai",
   "version": "0.1.0",
   "description": "Autonomous parallel coding - plan and execute with AI",
   "type": "module",
