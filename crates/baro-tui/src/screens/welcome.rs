@@ -9,7 +9,6 @@ use ratatui::{
 use crate::app::App;
 
 // Each letter defined separately for individual coloring
-// B letter (7 rows, 8 cols)
 const LETTER_B: [&str; 7] = [
     "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
     "\u{2588}\u{2588}   \u{2588}\u{2588}",
@@ -50,27 +49,20 @@ const LETTER_O: [&str; 7] = [
     " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
 ];
 
-// Rainbow color cycle
+// Use ANSI colors that work in ALL terminals (including macOS Terminal.app)
+// Color::Rgb does NOT work in Terminal.app - it renders as gray
 fn rainbow(idx: usize) -> Color {
-    match idx % 8 {
-        0 => Color::Rgb(255, 80, 80),   // red
-        1 => Color::Rgb(255, 160, 50),  // orange
-        2 => Color::Rgb(255, 220, 50),  // yellow
-        3 => Color::Rgb(80, 255, 120),  // green
-        4 => Color::Rgb(80, 220, 255),  // cyan
-        5 => Color::Rgb(100, 120, 255), // blue
-        6 => Color::Rgb(180, 80, 255),  // purple
-        7 => Color::Rgb(255, 80, 200),  // pink
+    match idx % 7 {
+        0 => Color::LightRed,
+        1 => Color::LightYellow,
+        2 => Color::LightGreen,
+        3 => Color::LightCyan,
+        4 => Color::LightBlue,
+        5 => Color::LightMagenta,
+        6 => Color::Yellow,
         _ => Color::White,
     }
 }
-
-const BRIGHT_WHITE: Color = Color::Rgb(255, 255, 255);
-const SOFT_WHITE: Color = Color::Rgb(220, 220, 230);
-const LIGHT_BLUE: Color = Color::Rgb(150, 180, 255);
-const BRIGHT_CYAN: Color = Color::Rgb(80, 220, 255);
-const BRIGHT_GREEN: Color = Color::Rgb(80, 255, 160);
-const DIM_BLUE: Color = Color::Rgb(60, 80, 140);
 
 pub fn render(f: &mut Frame, app: &App) {
     let area = f.area();
@@ -108,9 +100,9 @@ pub fn render(f: &mut Frame, app: &App) {
             .split(area)[1]
     };
 
-    // ── Logo: 4 letters, each gets its own color that shifts over time ──
+    // ── Logo: each letter gets its own animated color ──
     let tick = app.tick_count as usize;
-    let phase = tick / 3; // color shifts every 300ms
+    let phase = tick / 3;
 
     let mut logo_lines: Vec<Line> = Vec::new();
     for row in 0..7 {
@@ -124,17 +116,17 @@ pub fn render(f: &mut Frame, app: &App) {
                 LETTER_B[row].to_string(),
                 Style::default().fg(b_color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ", Style::default()),
+            Span::styled("  ".to_string(), Style::default()),
             Span::styled(
                 LETTER_A[row].to_string(),
                 Style::default().fg(a_color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ", Style::default()),
+            Span::styled("  ".to_string(), Style::default()),
             Span::styled(
                 LETTER_R[row].to_string(),
                 Style::default().fg(r_color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ", Style::default()),
+            Span::styled("  ".to_string(), Style::default()),
             Span::styled(
                 LETTER_O[row].to_string(),
                 Style::default().fg(o_color).add_modifier(Modifier::BOLD),
@@ -147,14 +139,20 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Tagline ──
     let tagline = Paragraph::new(Line::from(vec![
-        Span::styled("autonomous ", Style::default().fg(BRIGHT_CYAN)),
+        Span::styled(
+            "autonomous ",
+            Style::default().fg(Color::Cyan),
+        ),
         Span::styled(
             "parallel ",
             Style::default()
-                .fg(BRIGHT_WHITE)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("coding", Style::default().fg(BRIGHT_CYAN)),
+        Span::styled(
+            "coding",
+            Style::default().fg(Color::Cyan),
+        ),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(tagline, chunks[3]);
@@ -164,7 +162,7 @@ pub fn render(f: &mut Frame, app: &App) {
     let sep_str: String = std::iter::repeat_n('\u{2550}', sep_width as usize).collect();
     let separator = Paragraph::new(Line::from(Span::styled(
         sep_str,
-        Style::default().fg(DIM_BLUE),
+        Style::default().fg(Color::DarkGray),
     )))
     .alignment(Alignment::Center);
     f.render_widget(separator, chunks[5]);
@@ -176,21 +174,21 @@ pub fn render(f: &mut Frame, app: &App) {
     let display_text = if app.goal_input.is_empty() {
         Line::from(Span::styled(
             " Describe what you want to build...",
-            Style::default().fg(LIGHT_BLUE),
+            Style::default().fg(Color::DarkGray),
         ))
     } else {
         Line::from(Span::styled(
             format!(" {}", &app.goal_input),
             Style::default()
-                .fg(BRIGHT_WHITE)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ))
     };
 
     let border_color = if app.goal_input.is_empty() {
-        LIGHT_BLUE
+        Color::Blue
     } else {
-        BRIGHT_WHITE
+        Color::White
     };
 
     let input = Paragraph::new(display_text).block(
@@ -200,7 +198,7 @@ pub fn render(f: &mut Frame, app: &App) {
             .title(Span::styled(
                 " Goal ",
                 Style::default()
-                    .fg(BRIGHT_WHITE)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             )),
     );
@@ -218,9 +216,9 @@ pub fn render(f: &mut Frame, app: &App) {
     let is_claude = app.planner == crate::app::Planner::Claude;
 
     let active_color = match (app.tick_count / 6) % 3 {
-        0 => Color::Rgb(100, 200, 255),
-        1 => Color::Rgb(150, 150, 255),
-        _ => Color::Rgb(200, 130, 255),
+        0 => Color::LightCyan,
+        1 => Color::LightBlue,
+        _ => Color::LightMagenta,
     };
 
     let claude_style = if is_claude {
@@ -228,40 +226,40 @@ pub fn render(f: &mut Frame, app: &App) {
             .fg(active_color)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(SOFT_WHITE)
+        Style::default().fg(Color::Gray)
     };
     let openai_style = if !is_claude {
         Style::default()
             .fg(active_color)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(SOFT_WHITE)
+        Style::default().fg(Color::Gray)
     };
 
     let claude_marker = if is_claude { "\u{25c9}" } else { "\u{25cb}" };
     let openai_marker = if !is_claude { "\u{25c9}" } else { "\u{25cb}" };
 
     let planner = Paragraph::new(Line::from(vec![
-        Span::styled("  ", Style::default()),
+        Span::styled("  ".to_string(), Style::default()),
         Span::styled(format!("{} ", claude_marker), claude_style),
-        Span::styled("Claude", claude_style),
-        Span::styled("        ", Style::default()),
+        Span::styled("Claude".to_string(), claude_style),
+        Span::styled("        ".to_string(), Style::default()),
         Span::styled(format!("{} ", openai_marker), openai_style),
-        Span::styled("OpenAI", openai_style),
-        Span::styled("              ", Style::default()),
+        Span::styled("OpenAI".to_string(), openai_style),
+        Span::styled("              ".to_string(), Style::default()),
         Span::styled(
-            "\u{2190}\u{2192} switch",
-            Style::default().fg(SOFT_WHITE),
+            "\u{2190}\u{2192} switch".to_string(),
+            Style::default().fg(Color::Gray),
         ),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(LIGHT_BLUE))
+            .border_style(Style::default().fg(Color::Blue))
             .title(Span::styled(
                 " Planner ",
                 Style::default()
-                    .fg(BRIGHT_WHITE)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             )),
     );
@@ -272,25 +270,25 @@ pub fn render(f: &mut Frame, app: &App) {
         Span::styled(
             "Enter",
             Style::default()
-                .fg(BRIGHT_GREEN)
+                .fg(Color::LightGreen)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" start   ", Style::default().fg(SOFT_WHITE)),
+        Span::styled(" start   ", Style::default().fg(Color::Gray)),
         Span::styled(
             "Esc",
             Style::default()
-                .fg(Color::Rgb(255, 100, 100))
+                .fg(Color::LightRed)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" quit", Style::default().fg(SOFT_WHITE)),
+        Span::styled(" quit", Style::default().fg(Color::Gray)),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(help, chunks[11]);
 
     // ── Version ──
     let version = Paragraph::new(Line::from(Span::styled(
-        "v0.3.6",
-        Style::default().fg(DIM_BLUE),
+        "v0.3.7",
+        Style::default().fg(Color::DarkGray),
     )))
     .alignment(Alignment::Center);
     f.render_widget(version, chunks[12]);
