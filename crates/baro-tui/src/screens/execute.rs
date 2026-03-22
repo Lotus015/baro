@@ -3,8 +3,8 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        BarChart, Block, Borders, Gauge, List, ListItem, Paragraph, Row, Scrollbar,
-        ScrollbarOrientation, ScrollbarState, Sparkline, Table, Tabs, Wrap,
+        BarChart, Block, Borders, Cell, Gauge, List, ListItem, Paragraph, Row, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Table, Tabs, Wrap,
     },
     Frame,
 };
@@ -455,12 +455,7 @@ fn render_dag_full(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     let has_bar_data = app.stories.iter().any(|s| s.duration_secs.is_some());
-    let has_sparkline = app.parallelism_history.len() > 1;
-
     let mut constraints = vec![Constraint::Length(6)]; // Summary
-    if has_sparkline {
-        constraints.push(Constraint::Length(5)); // Sparkline
-    }
     if has_bar_data {
         constraints.push(Constraint::Length(10)); // Bar chart
     }
@@ -520,18 +515,24 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Avg: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!("{}:{:02}", avg / 60, avg % 60),
-                Style::default().fg(theme::ACCENT),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("    ", Style::default()),
             Span::styled("Fast: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!("{}:{:02}", fastest / 60, fastest % 60),
-                Style::default().fg(theme::SUCCESS),
+                Style::default()
+                    .fg(theme::SUCCESS)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("  Slow: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!("{}:{:02}", slowest / 60, slowest % 60),
-                Style::default().fg(theme::WARNING),
+                Style::default()
+                    .fg(theme::WARNING)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
@@ -582,32 +583,7 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     );
     f.render_widget(summary, stats_chunks[0]);
 
-    // ── Sparkline: parallelism over time ──
     let mut next_chunk = 1;
-    if has_sparkline {
-        let max_val = app
-            .parallelism_history
-            .iter()
-            .copied()
-            .max()
-            .unwrap_or(1);
-        let spark = Sparkline::default()
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme::BORDER))
-                    .title(Span::styled(
-                        format!(" Parallelism (max {}) ", max_val),
-                        Style::default()
-                            .fg(theme::ACCENT)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-            )
-            .data(&app.parallelism_history)
-            .style(Style::default().fg(theme::LOGO_2));
-        f.render_widget(spark, stats_chunks[next_chunk]);
-        next_chunk += 1;
-    }
 
     // ── Bar chart of story durations ──
     if has_bar_data {
@@ -635,7 +611,7 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
             .data(&bar_items)
             .bar_width(5)
             .bar_gap(1)
-            .bar_style(Style::default().fg(theme::ACCENT))
+            .bar_style(Style::default().fg(theme::ACCENT_BRIGHT))
             .value_style(
                 Style::default()
                     .fg(theme::TEXT)
@@ -754,7 +730,7 @@ fn render_progress(f: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
                 )),
         )
-        .gauge_style(Style::default().fg(theme::SUCCESS))
+        .gauge_style(Style::default().fg(theme::GAUGE_FG))
         .ratio(ratio)
         .label(Span::styled(
             label,
