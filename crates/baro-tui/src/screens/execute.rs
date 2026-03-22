@@ -1,9 +1,9 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        BarChart, Block, Borders, Cell, Gauge, List, ListItem, Paragraph, Row, Scrollbar,
+        BarChart, Block, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Scrollbar,
         ScrollbarOrientation, ScrollbarState, Table, Tabs, Wrap,
     },
     Frame,
@@ -33,6 +33,115 @@ pub fn render(f: &mut Frame, app: &App) {
 
     render_progress(f, app, chunks[2]);
     render_footer(f, app, chunks[3]);
+
+    if app.done {
+        render_completion(f, app);
+    }
+}
+
+// --- Completion Overlay ---
+
+fn render_completion(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let box_width = 50u16.min(area.width.saturating_sub(4));
+    let box_height = 14u16.min(area.height.saturating_sub(2));
+    let x = (area.width.saturating_sub(box_width)) / 2;
+    let y = (area.height.saturating_sub(box_height)) / 2;
+    let popup_area = Rect::new(x, y, box_width, box_height);
+
+    f.render_widget(Clear, popup_area);
+
+    let stats = app.final_stats.as_ref();
+    let completed = stats.map(|s| s.stories_completed).unwrap_or(app.completed);
+    let skipped = stats.map(|s| s.stories_skipped).unwrap_or(0);
+    let total_time = app.total_time_secs;
+    let files_created: u32 = stats
+        .map(|s| s.files_created)
+        .unwrap_or_else(|| app.stories.iter().map(|s| s.files_created).sum());
+    let files_modified: u32 = stats
+        .map(|s| s.files_modified)
+        .unwrap_or_else(|| app.stories.iter().map(|s| s.files_modified).sum());
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "ALL STORIES COMPLETE",
+            Style::default()
+                .fg(theme::SUCCESS)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Total stories:  ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{}", app.total),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Completed:      ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{}", completed),
+                Style::default()
+                    .fg(theme::SUCCESS)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Skipped:        ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{}", skipped),
+                Style::default().fg(if skipped > 0 {
+                    theme::WARNING
+                } else {
+                    theme::SUCCESS
+                }),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Total time:     ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{:02}:{:02}", total_time / 60, total_time % 60),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Files created:  ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{}", files_created),
+                Style::default().fg(theme::ACCENT),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Files modified: ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{}", files_modified),
+                Style::default().fg(theme::ACCENT),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("q quit", Style::default().fg(theme::MUTED))),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::SUCCESS))
+        .title(Span::styled(
+            " Complete ",
+            Style::default()
+                .fg(theme::SUCCESS)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center);
+
+    f.render_widget(paragraph, popup_area);
 }
 
 // --- Header with Tabs ---
