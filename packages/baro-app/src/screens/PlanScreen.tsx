@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react"
+import React, { useState, useCallback, useEffect } from "react"
 import { Box, Text, useInput } from "ink"
 import Spinner from "ink-spinner"
 import { Planner } from "../core/planner.js"
@@ -15,14 +15,14 @@ interface Props {
 export function PlanScreen({ plannerMode, onPlanReady, onQuit }: Props) {
     const [input, setInput] = useState("")
     const [loading, setLoading] = useState(false)
-    const [tokenCount, setTokenCount] = useState(0)
+    const [elapsed, setElapsed] = useState(0)
     const [toolCalls, setToolCalls] = useState<string[]>([])
     const [error, setError] = useState("")
     const [planner] = useState(() => {
         if (plannerMode === "openai") {
             return new Planner({
                 cwd: process.cwd(),
-                onToken: () => setTokenCount((c) => c + 1),
+                onToken: () => {},
                 onToolCall: (name: string, args: any) => {
                     let label = name
                     if (name === "read_file") label = `Reading ${args?.path ?? "..."}`
@@ -41,12 +41,19 @@ export function PlanScreen({ plannerMode, onPlanReady, onQuit }: Props) {
         })
     })
 
+    // Elapsed timer while loading
+    useEffect(() => {
+        if (!loading) return
+        const interval = setInterval(() => setElapsed((e) => e + 1), 1000)
+        return () => clearInterval(interval)
+    }, [loading])
+
     const submit = useCallback(async () => {
         const goal = input.trim()
         if (!goal) return
 
         setLoading(true)
-        setTokenCount(0)
+        setElapsed(0)
         setToolCalls([])
         setError("")
 
@@ -87,8 +94,8 @@ export function PlanScreen({ plannerMode, onPlanReady, onQuit }: Props) {
                 <Box flexDirection="column">
                     <Box>
                         <Text color="cyan"><Spinner type="dots" /></Text>
-                        <Text> {toolCalls.length > 0 && tokenCount === 0 ? "Exploring codebase..." : "Generating plan..."} </Text>
-                        <Text dimColor>({tokenCount} tokens)</Text>
+                        <Text> {toolCalls.length > 0 ? "Exploring codebase..." : "Generating plan..."} </Text>
+                        <Text dimColor>({elapsed}s)</Text>
                     </Box>
                     {toolCalls.map((tc, i) => (
                         <Text key={i} dimColor>  ⚙ {tc}</Text>
