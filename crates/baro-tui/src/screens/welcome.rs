@@ -8,57 +8,63 @@ use ratatui::{
 
 use crate::app::App;
 
-// Massive C64-style blocky logo using full block characters
-// Each letter is 8 chars wide, 7 rows tall
-const LOGO: &[&str] = &[
-    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
-    " \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}    \u{2588}\u{2588} ",
-    " \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}    \u{2588}\u{2588} ",
-    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}    \u{2588}\u{2588} ",
-    " \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}\u{2580}  \u{2588}\u{2588}  \u{2588}\u{2588}    \u{2588}\u{2588} ",
-    " \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}    \u{2588}\u{2588} ",
-    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}   \u{2588}\u{2588}  \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
+// Each letter defined separately for individual coloring
+// B letter (7 rows, 8 cols)
+const LETTER_B: [&str; 7] = [
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
 ];
 
-// C64-inspired bright color palette - animated rainbow cycle
-fn logo_color(row: usize, col: usize, tick: u64) -> Color {
-    let phase = (tick / 2) as usize;
-    let idx = (row + col / 4 + phase) % 8;
-    match idx {
-        0 => Color::Rgb(100, 100, 255), // blue
-        1 => Color::Rgb(140, 80, 255),  // purple
-        2 => Color::Rgb(200, 60, 255),  // magenta
-        3 => Color::Rgb(255, 80, 180),  // pink
-        4 => Color::Rgb(255, 120, 80),  // orange
-        5 => Color::Rgb(255, 200, 50),  // yellow
-        6 => Color::Rgb(80, 255, 120),  // green
-        7 => Color::Rgb(80, 200, 255),  // cyan
+const LETTER_A: [&str; 7] = [
+    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+];
+
+const LETTER_R: [&str; 7] = [
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}\u{2580}  \u{2588}\u{2588}",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+];
+
+const LETTER_O: [&str; 7] = [
+    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}    \u{2588}\u{2588}",
+    "\u{2588}\u{2588}    \u{2588}\u{2588}",
+    "\u{2588}\u{2588}    \u{2588}\u{2588}",
+    "\u{2588}\u{2588}    \u{2588}\u{2588}",
+    "\u{2588}\u{2588}    \u{2588}\u{2588}",
+    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
+];
+
+// Rainbow color cycle
+fn rainbow(idx: usize) -> Color {
+    match idx % 8 {
+        0 => Color::Rgb(255, 80, 80),   // red
+        1 => Color::Rgb(255, 160, 50),  // orange
+        2 => Color::Rgb(255, 220, 50),  // yellow
+        3 => Color::Rgb(80, 255, 120),  // green
+        4 => Color::Rgb(80, 220, 255),  // cyan
+        5 => Color::Rgb(100, 120, 255), // blue
+        6 => Color::Rgb(180, 80, 255),  // purple
+        7 => Color::Rgb(255, 80, 200),  // pink
         _ => Color::White,
     }
 }
 
-// Per-character colored line for the logo
-fn colored_logo_line<'a>(line: &'a str, row: usize, tick: u64) -> Line<'a> {
-    let spans: Vec<Span> = line
-        .char_indices()
-        .map(|(i, ch)| {
-            let color = if ch == ' ' {
-                Color::Reset
-            } else {
-                logo_color(row, i, tick)
-            };
-            Span::styled(
-                &line[i..i + ch.len_utf8()],
-                Style::default()
-                    .fg(color)
-                    .add_modifier(Modifier::BOLD),
-            )
-        })
-        .collect();
-    Line::from(spans)
-}
-
-// Bright white with full intensity
 const BRIGHT_WHITE: Color = Color::Rgb(255, 255, 255);
 const SOFT_WHITE: Color = Color::Rgb(220, 220, 230);
 const LIGHT_BLUE: Color = Color::Rgb(150, 180, 255);
@@ -73,20 +79,20 @@ pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),        // Top padding
-            Constraint::Length(7),      // Logo (7 rows)
-            Constraint::Length(1),      // Spacer
-            Constraint::Length(1),      // Tagline
-            Constraint::Length(1),      // Spacer
-            Constraint::Length(1),      // Separator
-            Constraint::Length(1),      // Spacer
-            Constraint::Length(3),      // Goal input
-            Constraint::Length(1),      // Spacer
-            Constraint::Length(3),      // Planner selector
-            Constraint::Length(2),      // Spacer
-            Constraint::Length(1),      // Help text
-            Constraint::Length(1),      // Version
-            Constraint::Min(1),        // Bottom padding
+            Constraint::Min(1),
+            Constraint::Length(7),  // Logo
+            Constraint::Length(1),  // Spacer
+            Constraint::Length(1),  // Tagline
+            Constraint::Length(1),  // Spacer
+            Constraint::Length(1),  // Separator
+            Constraint::Length(1),  // Spacer
+            Constraint::Length(3),  // Goal input
+            Constraint::Length(1),  // Spacer
+            Constraint::Length(3),  // Planner selector
+            Constraint::Length(2),  // Spacer
+            Constraint::Length(1),  // Help text
+            Constraint::Length(1),  // Version
+            Constraint::Min(1),
         ])
         .split(area);
 
@@ -102,37 +108,58 @@ pub fn render(f: &mut Frame, app: &App) {
             .split(area)[1]
     };
 
-    // ── Massive C64 logo with per-character rainbow animation ──
-    let logo_lines: Vec<Line> = LOGO
-        .iter()
-        .enumerate()
-        .map(|(i, line)| colored_logo_line(line, i, app.tick_count))
-        .collect();
+    // ── Logo: 4 letters, each gets its own color that shifts over time ──
+    let tick = app.tick_count as usize;
+    let phase = tick / 3; // color shifts every 300ms
+
+    let mut logo_lines: Vec<Line> = Vec::new();
+    for row in 0..7 {
+        let b_color = rainbow(phase + 0 + row);
+        let a_color = rainbow(phase + 2 + row);
+        let r_color = rainbow(phase + 4 + row);
+        let o_color = rainbow(phase + 6 + row);
+
+        logo_lines.push(Line::from(vec![
+            Span::styled(
+                LETTER_B[row].to_string(),
+                Style::default().fg(b_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                LETTER_A[row].to_string(),
+                Style::default().fg(a_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                LETTER_R[row].to_string(),
+                Style::default().fg(r_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                LETTER_O[row].to_string(),
+                Style::default().fg(o_color).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
 
     let logo = Paragraph::new(logo_lines).alignment(Alignment::Center);
     f.render_widget(logo, chunks[1]);
 
-    // ── Tagline - bright and punchy ──
+    // ── Tagline ──
     let tagline = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "autonomous ",
-            Style::default().fg(BRIGHT_CYAN),
-        ),
+        Span::styled("autonomous ", Style::default().fg(BRIGHT_CYAN)),
         Span::styled(
             "parallel ",
             Style::default()
                 .fg(BRIGHT_WHITE)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            "coding",
-            Style::default().fg(BRIGHT_CYAN),
-        ),
+        Span::styled("coding", Style::default().fg(BRIGHT_CYAN)),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(tagline, chunks[3]);
 
-    // ── Separator - bright line ──
+    // ── Separator ──
     let sep_width = 50.min(w.saturating_sub(4));
     let sep_str: String = std::iter::repeat_n('\u{2550}', sep_width as usize).collect();
     let separator = Paragraph::new(Line::from(Span::styled(
@@ -142,7 +169,7 @@ pub fn render(f: &mut Frame, app: &App) {
     .alignment(Alignment::Center);
     f.render_widget(separator, chunks[5]);
 
-    // ── Goal input - bright white borders ──
+    // ── Goal input ──
     let input_width = 70.min(w.saturating_sub(4));
     let input_area = center(chunks[7], input_width);
 
@@ -186,11 +213,10 @@ pub fn render(f: &mut Frame, app: &App) {
         f.set_cursor_position((cursor_x, cursor_y));
     }
 
-    // ── Planner selector - bright white with colored active state ──
+    // ── Planner selector ──
     let planner_area = center(chunks[9], input_width);
     let is_claude = app.planner == crate::app::Planner::Claude;
 
-    // Active planner gets a bright animated color
     let active_color = match (app.tick_count / 6) % 3 {
         0 => Color::Rgb(100, 200, 255),
         1 => Color::Rgb(150, 150, 255),
@@ -241,7 +267,7 @@ pub fn render(f: &mut Frame, app: &App) {
     );
     f.render_widget(planner, planner_area);
 
-    // ── Keybinds - bright ──
+    // ── Keybinds ──
     let help = Paragraph::new(Line::from(vec![
         Span::styled(
             "Enter",
@@ -263,7 +289,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Version ──
     let version = Paragraph::new(Line::from(Span::styled(
-        "v0.3.5",
+        "v0.3.6",
         Style::default().fg(DIM_BLUE),
     )))
     .alignment(Alignment::Center);
