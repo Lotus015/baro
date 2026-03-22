@@ -223,25 +223,19 @@ pub fn render(f: &mut Frame, app: &App) {
     let planner_area = center(chunks[7], input_width);
     let is_claude = app.planner == crate::app::Planner::Claude;
 
-    let active_color = match (app.tick_count / 6) % 3 {
-        0 => Color::LightCyan,
-        1 => Color::LightBlue,
-        _ => Color::LightMagenta,
-    };
-
     let claude_style = if is_claude {
         Style::default()
-            .fg(active_color)
+            .fg(Color::LightCyan)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Gray)
+        Style::default().fg(Color::DarkGray)
     };
     let openai_style = if !is_claude {
         Style::default()
-            .fg(active_color)
+            .fg(Color::LightCyan)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Gray)
+        Style::default().fg(Color::DarkGray)
     };
 
     let claude_marker = if is_claude { "\u{25c9}" } else { "\u{25cb}" };
