@@ -13,10 +13,19 @@ export function PlanScreen({ onPlanReady, onQuit }: Props) {
     const [input, setInput] = useState("")
     const [loading, setLoading] = useState(false)
     const [tokenCount, setTokenCount] = useState(0)
+    const [toolCalls, setToolCalls] = useState<string[]>([])
     const [error, setError] = useState("")
     const [planner] = useState(() => new Planner({
         cwd: process.cwd(),
         onToken: () => setTokenCount((c) => c + 1),
+        onToolCall: (name, args) => {
+            let label = name
+            if (name === "read_file") label = `Reading ${args?.path ?? "..."}`
+            else if (name === "grep") label = `Searching for "${args?.pattern ?? "..."}"`
+            else if (name === "list_files") label = `Listing ${args?.path || "root"}`
+            else if (name === "file_tree") label = "Scanning project structure"
+            setToolCalls((prev) => [...prev.slice(-8), label])
+        },
     }))
 
     const submit = useCallback(async () => {
@@ -25,6 +34,7 @@ export function PlanScreen({ onPlanReady, onQuit }: Props) {
 
         setLoading(true)
         setTokenCount(0)
+        setToolCalls([])
         setError("")
 
         try {
@@ -61,10 +71,15 @@ export function PlanScreen({ onPlanReady, onQuit }: Props) {
             <Box marginTop={1} />
 
             {loading ? (
-                <Box>
-                    <Text color="cyan"><Spinner type="dots" /></Text>
-                    <Text> Generating plan... </Text>
-                    <Text dimColor>({tokenCount} tokens)</Text>
+                <Box flexDirection="column">
+                    <Box>
+                        <Text color="cyan"><Spinner type="dots" /></Text>
+                        <Text> {toolCalls.length > 0 && tokenCount === 0 ? "Exploring codebase..." : "Generating plan..."} </Text>
+                        <Text dimColor>({tokenCount} tokens)</Text>
+                    </Box>
+                    {toolCalls.map((tc, i) => (
+                        <Text key={i} dimColor>  ⚙ {tc}</Text>
+                    ))}
                 </Box>
             ) : (
                 <Box>

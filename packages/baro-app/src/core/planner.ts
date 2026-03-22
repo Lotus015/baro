@@ -7,6 +7,8 @@ import { z } from "zod"
 import { zodToJsonSchema } from "zod-to-json-schema"
 import type { PrdV2 } from "./prd.js"
 import { streamCompletion } from "./stream.js"
+import { createCodebaseTools } from "./tools.js"
+import type { ToolDef } from "./stream.js"
 import * as fs from "fs"
 import * as path from "path"
 
@@ -29,6 +31,12 @@ const PrdSchema = z.object({
 })
 
 const SYSTEM_PROMPT = `You are an expert software architect. Break down project goals into concrete user stories that form a dependency DAG.
+
+IMPORTANT: Before generating a plan, USE YOUR TOOLS to explore the existing codebase:
+1. Call file_tree to see the project structure
+2. Call read_file on key files (package.json, README, entry points, configs)
+3. Call grep to find relevant patterns
+4. THEN generate a plan that fits the existing code
 
 Rules:
 - Each story: single focused unit of work for one AI agent
@@ -63,27 +71,22 @@ export interface PlannerOptions {
     model?: string
     cwd?: string
     onToken?: (token: string) => void
+    onToolCall?: (name: string, args: any) => void
 }
 
 export class Planner {
     private messages: { role: string; content: string }[]
     private model: string
     private onToken?: (token: string) => void
+    private onToolCall?: (name: string, args: any) => void
+    private tools: ToolDef[]
 
     constructor(options: PlannerOptions = {}) {
         this.model = options.model ?? "gpt-5.4"
         this.onToken = options.onToken
+        this.onToolCall = options.onToolCall
+        this.tools = options.cwd ? createCodebaseTools(options.cwd) : []
         this.messages = [{ role: "system", content: SYSTEM_PROMPT }]
-
-        if (options.cwd) {
-            const context = gatherContext(options.cwd)
-            if (context) {
-                this.messages.push({
-                    role: "system",
-                    content: `Existing codebase:\n${context}`,
-                })
-            }
-        }
     }
 
     async send(userMessage: string): Promise<PrdV2> {
@@ -98,7 +101,9 @@ export class Planner {
             task: userMessage,
             jsonSchema: schema,
             reasoning: { effort: "high" },
+            tools: this.tools.length > 0 ? this.tools : undefined,
             onToken: this.onToken ?? (() => {}),
+            onToolCall: this.onToolCall,
         })
 
         let prd: z.infer<typeof PrdSchema>
@@ -125,31 +130,3 @@ export class Planner {
     }
 }
 
-function gatherContext(cwd: string): string | null {
-    const parts: string[] = []
-    const pkgPath = path.join(cwd, "package.json")
-    if (fs.existsSync(pkgPath)) {
-        try {
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"))
-            parts.push(`Project: ${pkg.name ?? "unknown"}`)
-            if (pkg.dependencies) parts.push(`Deps: ${Object.keys(pkg.dependencies).join(", ")}`)
-        } catch {}
-    }
-
-    const files: string[] = []
-    const ignore = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage", "target"])
-    function walk(dir: string, prefix: string, depth: number) {
-        if (depth > 3 || files.length > 50) return
-        try {
-            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-                if (ignore.has(entry.name) || entry.name.startsWith(".")) continue
-                const rel = prefix ? `${prefix}/${entry.name}` : entry.name
-                if (entry.isDirectory()) { files.push(rel + "/"); walk(path.join(dir, entry.name), rel, depth + 1) }
-                else files.push(rel)
-            }
-        } catch {}
-    }
-    walk(cwd, "", 0)
-    if (files.length > 0) parts.push(`\nFiles:\n${files.join("\n")}`)
-    return parts.length > 0 ? parts.join("\n") : null
-}
