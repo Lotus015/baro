@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::theme;
 
 // Giant blocky letters - each is ~12 wide, 9 rows tall
 // Using double-width block chars for maximum chunkiness
@@ -144,14 +145,14 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Tagline ──
     let tagline = Paragraph::new(Line::from(vec![
-        Span::styled("autonomous ", Style::default().fg(Color::Cyan)),
+        Span::styled("autonomous ", Style::default().fg(theme::ACCENT_BRIGHT)),
         Span::styled(
             "parallel ",
             Style::default()
-                .fg(Color::White)
+                .fg(theme::TEXT)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("coding", Style::default().fg(Color::Cyan)),
+        Span::styled("coding", Style::default().fg(theme::ACCENT_BRIGHT)),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(tagline, chunks[3]);
@@ -170,12 +171,12 @@ pub fn render(f: &mut Frame, app: &App) {
             Line::from(vec![
                 Span::styled(
                     " What do you want to build?  ".to_string(),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::MUTED),
                 ),
                 Span::styled(
                     cursor_char.to_string(),
                     Style::default()
-                        .fg(Color::LightGreen)
+                        .fg(theme::SUCCESS)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
@@ -188,13 +189,13 @@ pub fn render(f: &mut Frame, app: &App) {
                 Span::styled(
                     format!(" {}", &app.goal_input),
                     Style::default()
-                        .fg(Color::White)
+                        .fg(theme::TEXT)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     cursor_char.to_string(),
                     Style::default()
-                        .fg(Color::LightGreen)
+                        .fg(theme::SUCCESS)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
@@ -206,14 +207,14 @@ pub fn render(f: &mut Frame, app: &App) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(if app.goal_input.is_empty() {
-                Color::Gray
+                theme::BORDER
             } else {
-                Color::LightCyan
+                theme::BORDER_ACTIVE
             }))
             .title(Span::styled(
                 " Goal ",
                 Style::default()
-                    .fg(Color::White)
+                    .fg(theme::TEXT)
                     .add_modifier(Modifier::BOLD),
             )),
     );
@@ -225,17 +226,17 @@ pub fn render(f: &mut Frame, app: &App) {
 
     let claude_style = if is_claude {
         Style::default()
-            .fg(Color::LightCyan)
+            .fg(theme::ACCENT_BRIGHT)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::MUTED)
     };
     let openai_style = if !is_claude {
         Style::default()
-            .fg(Color::LightCyan)
+            .fg(theme::ACCENT_BRIGHT)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::MUTED)
     };
 
     let claude_marker = if is_claude { "\u{25c9}" } else { "\u{25cb}" };
@@ -251,17 +252,17 @@ pub fn render(f: &mut Frame, app: &App) {
         Span::styled("              ".to_string(), Style::default()),
         Span::styled(
             "\u{2190}\u{2192} switch".to_string(),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::MUTED),
         ),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Gray))
+            .border_style(Style::default().fg(theme::BORDER))
             .title(Span::styled(
                 " Planner ",
                 Style::default()
-                    .fg(Color::White)
+                    .fg(theme::TEXT)
                     .add_modifier(Modifier::BOLD),
             )),
     );
@@ -272,17 +273,17 @@ pub fn render(f: &mut Frame, app: &App) {
         Span::styled(
             "Enter",
             Style::default()
-                .fg(Color::LightGreen)
+                .fg(theme::SUCCESS)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" start   ", Style::default().fg(Color::Gray)),
+        Span::styled(" start   ", Style::default().fg(theme::TEXT_DIM)),
         Span::styled(
             "Esc",
             Style::default()
-                .fg(Color::LightRed)
+                .fg(theme::ERROR)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" quit", Style::default().fg(Color::Gray)),
+        Span::styled(" quit", Style::default().fg(theme::TEXT_DIM)),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(help, chunks[9]);
@@ -290,7 +291,7 @@ pub fn render(f: &mut Frame, app: &App) {
     // ── Version ──
     let version = Paragraph::new(Line::from(Span::styled(
         "v0.3.8",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(theme::MUTED),
     )))
     .alignment(Alignment::Center);
     f.render_widget(version, chunks[10]);
