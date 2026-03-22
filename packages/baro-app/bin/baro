@@ -2,7 +2,18 @@
 # Wrapper script that finds and runs the baro native binary.
 # The native binary is downloaded by postinstall.js as baro-native.
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve symlinks to find the real script location
+SELF="$0"
+while [ -L "$SELF" ]; do
+    DIR="$(cd "$(dirname "$SELF")" && pwd)"
+    SELF="$(readlink "$SELF")"
+    case "$SELF" in
+        /*) ;;
+        *) SELF="$DIR/$SELF" ;;
+    esac
+done
+SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+
 NATIVE="$SCRIPT_DIR/baro-native"
 
 if [ ! -f "$NATIVE" ]; then
