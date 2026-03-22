@@ -2,7 +2,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{
+        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+    },
     Frame,
 };
 
@@ -26,12 +28,16 @@ pub fn render(f: &mut Frame, app: &App) {
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
             " BARO ",
-            Style::default().fg(theme::LOGO_1).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::LOGO_1)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" | ", Style::default().fg(theme::BORDER)),
         Span::styled(
             "Plan Review",
-            Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" | ", Style::default().fg(theme::BORDER)),
         Span::styled(
@@ -59,15 +65,19 @@ pub fn render(f: &mut Frame, app: &App) {
         for (i, story) in app.review_stories.iter().enumerate() {
             let is_selected = i == app.review_scroll;
 
-            let marker = if is_selected { ">" } else { " " };
+            let marker = if is_selected { "\u{25b6}" } else { " " };
             let marker_style = if is_selected {
-                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme::MUTED)
             };
 
             let title_style = if is_selected {
-                Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme::TEXT_DIM)
             };
@@ -76,7 +86,9 @@ pub fn render(f: &mut Frame, app: &App) {
                 Span::styled(format!(" {} ", marker), marker_style),
                 Span::styled(
                     format!("{}: ", story.id),
-                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::ACCENT)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(&story.title, title_style),
             ]));
@@ -92,8 +104,8 @@ pub fn render(f: &mut Frame, app: &App) {
                 lines.push(Line::from(vec![
                     Span::raw("     "),
                     Span::styled(
-                        format!("deps: {}", story.depends_on.join(", ")),
-                        Style::default().fg(theme::MUTED),
+                        format!("\u{2514} deps: {}", story.depends_on.join(", ")),
+                        Style::default().fg(theme::ACCENT_DIM),
                     ),
                 ]));
             }
@@ -103,6 +115,7 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     let inner_height = chunks[1].height.saturating_sub(2) as usize;
+    let total_lines = lines.len();
     let scroll_offset = if app.review_scroll * 4 > inner_height {
         (app.review_scroll * 4).saturating_sub(inner_height / 2)
     } else {
@@ -116,22 +129,55 @@ pub fn render(f: &mut Frame, app: &App) {
                 .border_style(Style::default().fg(theme::BORDER))
                 .title(Span::styled(
                     " Plan ",
-                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::ACCENT)
+                        .add_modifier(Modifier::BOLD),
                 )),
         )
         .scroll((scroll_offset as u16, 0))
         .wrap(Wrap { trim: false });
     f.render_widget(plan, chunks[1]);
 
+    // Scrollbar
+    if total_lines > inner_height {
+        let mut scrollbar_state = ScrollbarState::new(total_lines.saturating_sub(inner_height))
+            .position(scroll_offset);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(theme::ACCENT_DIM))
+            .begin_symbol(Some("\u{25b2}"))
+            .end_symbol(Some("\u{25bc}"));
+        f.render_stateful_widget(scrollbar, chunks[1], &mut scrollbar_state);
+    }
+
     // Footer
     let footer = Paragraph::new(Line::from(vec![
-        Span::styled("Enter", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Enter",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(":accept  ", Style::default().fg(theme::MUTED)),
-        Span::styled("up/down", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "\u{2191}/\u{2193}",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(":scroll  ", Style::default().fg(theme::MUTED)),
-        Span::styled("r", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "r",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(":refine  ", Style::default().fg(theme::MUTED)),
-        Span::styled("q", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "q",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(":quit", Style::default().fg(theme::MUTED)),
     ]));
     f.render_widget(footer, chunks[2]);

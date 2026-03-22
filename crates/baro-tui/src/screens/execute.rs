@@ -2,7 +2,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Row, Table, Tabs, Wrap},
+    widgets::{
+        Block, Borders, Gauge, List, ListItem, Paragraph, Row, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Table, Tabs, Wrap,
+    },
     Frame,
 };
 
@@ -263,8 +266,9 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_default();
 
     if let Some(story) = app.active_stories.get(&selected_id) {
+        let total_logs = story.logs.len();
         let inner_height = log_chunks[1].height.saturating_sub(2) as usize;
-        let skip = story.logs.len().saturating_sub(inner_height);
+        let skip = total_logs.saturating_sub(inner_height);
         let visible_logs: Vec<Line> = story.logs[skip..]
             .iter()
             .map(|l| Line::from(Span::styled(l.clone(), Style::default().fg(theme::TEXT))))
@@ -275,13 +279,24 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
             .border_style(Style::default().fg(theme::WARNING))
             .title(Span::styled(
                 format!(" {} ", story.id),
-                Style::default().fg(theme::WARNING).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::WARNING)
+                    .add_modifier(Modifier::BOLD),
             ));
 
         let p = Paragraph::new(visible_logs)
             .block(block)
             .wrap(Wrap { trim: false });
         f.render_widget(p, log_chunks[1]);
+
+        // Log scrollbar
+        if total_logs > inner_height {
+            let mut scrollbar_state =
+                ScrollbarState::new(total_logs.saturating_sub(inner_height)).position(skip);
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .style(Style::default().fg(theme::WARNING_DIM));
+            f.render_stateful_widget(scrollbar, log_chunks[1], &mut scrollbar_state);
+        }
     }
 }
 
