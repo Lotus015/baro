@@ -106,6 +106,7 @@ pub struct App {
 
     // Review screen
     pub branch_name: String,
+    pub description: String,
     pub review_stories: Vec<ReviewStory>,
     pub review_scroll: usize,
 
@@ -141,6 +142,7 @@ impl App {
             planning_error: None,
 
             branch_name: String::new(),
+            description: String::new(),
             review_stories: Vec::new(),
             review_scroll: 0,
 

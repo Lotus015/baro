@@ -1,11 +1,13 @@
 mod app;
 mod events;
+mod executor;
 mod screens;
 mod theme;
 mod ui;
 
 use std::fs::OpenOptions;
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
@@ -18,7 +20,6 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 
 use app::{App, Planner, ReviewStory, Screen};
-#[allow(unused_imports)]
 use events::BaroEvent;
 
 #[derive(Parser)]
@@ -30,15 +31,17 @@ struct Cli {
     /// Planner to use
     #[arg(long, default_value = "claude", value_parser = ["claude", "openai"])]
     planner: String,
+
+    /// Working directory
+    #[arg(long, default_value = ".")]
+    cwd: String,
 }
 
-#[allow(dead_code)]
 enum AppEvent {
     Baro(BaroEvent),
     Key(crossterm::event::KeyEvent),
-    PlanReady(Vec<ReviewStory>, String, String),
+    PlanReady(Vec<ReviewStory>, String, String, String),
     PlanError(String),
-    StdinClosed,
     Tick,
 }
 
@@ -90,11 +93,11 @@ struct PrdOutput {
     #[serde(default)]
     description: String,
     #[serde(rename = "userStories")]
-    user_stories: Vec<PrdStory>,
+    user_stories: Vec<PrdStoryOutput>,
 }
 
 #[derive(serde::Deserialize)]
-struct PrdStory {
+struct PrdStoryOutput {
     id: String,
     title: String,
     #[serde(default)]
@@ -133,8 +136,8 @@ async fn run_app(
     cli: Cli,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
+    let cwd = std::fs::canonicalize(&cli.cwd)?;
 
-    // Apply CLI args
     app.planner = match cli.planner.as_str() {
         "openai" => Planner::OpenAI,
         _ => Planner::Claude,
@@ -146,7 +149,7 @@ async fn run_app(
     if let Some(goal) = cli.goal {
         app.goal_input = goal;
         app.start_planning();
-        spawn_planner(&app, tx.clone());
+        spawn_planner(&app, &cwd, tx.clone());
     }
 
     // Keyboard input from /dev/tty
@@ -176,9 +179,10 @@ async fn run_app(
         terminal.draw(|f| ui::render(f, &app))?;
         match rx.recv().await {
             Some(AppEvent::Baro(ev)) => app.handle_event(ev),
-            Some(AppEvent::PlanReady(stories, project, branch)) => {
+            Some(AppEvent::PlanReady(stories, project, branch, description)) => {
                 app.project = project;
                 app.branch_name = branch;
+                app.description = description;
                 app.show_review(stories);
             }
             Some(AppEvent::PlanError(err)) => {
@@ -196,7 +200,7 @@ async fn run_app(
                         KeyCode::Enter => {
                             if !app.goal_input.is_empty() {
                                 app.start_planning();
-                                spawn_planner(&app, tx.clone());
+                                spawn_planner(&app, &cwd, tx.clone());
                             }
                         }
                         KeyCode::Char(c) => app.goal_input.push(c),
@@ -211,8 +215,19 @@ async fn run_app(
                     Screen::Review => match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                         KeyCode::Enter => {
-                            app.start_execution();
-                            // TODO: spawn executor processes
+                            // Write prd.json and start execution
+                            let prd = executor::prd_from_review(
+                                &app.project,
+                                &app.branch_name,
+                                &app.description,
+                                &app.review_stories,
+                            );
+                            if let Err(e) = executor::write_prd(&prd, &cwd) {
+                                app.planning_error = Some(format!("Failed to write prd.json: {}", e));
+                            } else {
+                                app.start_execution();
+                                spawn_executor(prd, cwd.clone(), tx.clone());
+                            }
                         }
                         KeyCode::Up | KeyCode::Char('k') => app.review_prev(),
                         KeyCode::Down | KeyCode::Char('j') => app.review_next(),
@@ -234,11 +249,6 @@ async fn run_app(
                     },
                 }
             }
-            Some(AppEvent::StdinClosed) => {
-                if app.screen == Screen::Execute && !app.done {
-                    app.done = true;
-                }
-            }
             Some(AppEvent::Tick) => { app.tick_count += 1; }
             None => break,
         }
@@ -246,19 +256,20 @@ async fn run_app(
     Ok(())
 }
 
-fn spawn_planner(app: &App, tx: mpsc::Sender<AppEvent>) {
+fn spawn_planner(app: &App, cwd: &PathBuf, tx: mpsc::Sender<AppEvent>) {
     let goal = app.goal_input.clone();
     let planner = app.planner;
+    let cwd = cwd.clone();
 
     tokio::spawn(async move {
         let result = match planner {
-            Planner::Claude => run_claude_planner(&goal).await,
-            Planner::OpenAI => run_openai_planner(&goal).await,
+            Planner::Claude => run_claude_planner(&goal, &cwd).await,
+            Planner::OpenAI => run_openai_planner(&goal, &cwd).await,
         };
 
         match result {
-            Ok((stories, project, branch)) => {
-                let _ = tx.send(AppEvent::PlanReady(stories, project, branch)).await;
+            Ok((stories, project, branch, description)) => {
+                let _ = tx.send(AppEvent::PlanReady(stories, project, branch, description)).await;
             }
             Err(e) => {
                 let _ = tx.send(AppEvent::PlanError(e.to_string())).await;
@@ -267,7 +278,27 @@ fn spawn_planner(app: &App, tx: mpsc::Sender<AppEvent>) {
     });
 }
 
-async fn run_claude_planner(goal: &str) -> Result<(Vec<ReviewStory>, String, String), Box<dyn std::error::Error + Send + Sync>> {
+fn spawn_executor(prd: executor::PrdFile, cwd: PathBuf, tx: mpsc::Sender<AppEvent>) {
+    // Create a channel bridge: executor sends BaroEvent, we wrap them as AppEvent::Baro
+    let (exec_tx, mut exec_rx) = mpsc::channel::<BaroEvent>(256);
+
+    // Forward BaroEvents to AppEvents
+    let tx_fwd = tx.clone();
+    tokio::spawn(async move {
+        while let Some(ev) = exec_rx.recv().await {
+            if tx_fwd.send(AppEvent::Baro(ev)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Run executor
+    tokio::spawn(async move {
+        executor::run_executor(prd, cwd, exec_tx).await;
+    });
+}
+
+async fn run_claude_planner(goal: &str, cwd: &PathBuf) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
     let prompt = format!("{}\n\nUser goal: {}", CLAUDE_PLANNER_PROMPT, goal);
 
     let output = Command::new("claude")
@@ -277,6 +308,7 @@ async fn run_claude_planner(goal: &str) -> Result<(Vec<ReviewStory>, String, Str
             "-p",
             &prompt,
         ])
+        .current_dir(cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?
@@ -300,7 +332,6 @@ async fn run_claude_planner(goal: &str) -> Result<(Vec<ReviewStory>, String, Str
         .and_then(|v| v.as_str())
         .unwrap_or(&stdout);
 
-    // Try to extract JSON from the text (Claude sometimes wraps in markdown)
     let json_str = extract_json(plan_text);
 
     let prd: PrdOutput = serde_json::from_str(&json_str)
@@ -316,19 +347,37 @@ async fn run_claude_planner(goal: &str) -> Result<(Vec<ReviewStory>, String, Str
         })
         .collect();
 
-    Ok((stories, prd.project, prd.branch_name))
+    Ok((stories, prd.project, prd.branch_name, prd.description))
 }
 
-async fn run_openai_planner(goal: &str) -> Result<(Vec<ReviewStory>, String, String), Box<dyn std::error::Error + Send + Sync>> {
-    // Spawn the TS OpenAI planner
-    let cwd = std::env::current_dir()?;
+async fn run_openai_planner(goal: &str, cwd: &PathBuf) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
+    // Find the openai-planner.js relative to the binary or use node_modules
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+
+    // Try multiple locations for the planner script
+    let script_paths = [
+        exe_dir.as_ref().map(|d| d.join("openai-planner.js")),
+        Some(cwd.join("node_modules/baro-ai/dist/openai-planner.js")),
+        Some(cwd.join("openai-planner.js")),
+    ];
+
+    let script_path = script_paths
+        .iter()
+        .filter_map(|p| p.as_ref())
+        .find(|p| p.exists())
+        .ok_or("Could not find openai-planner.js")?
+        .clone();
+
     let output = Command::new("node")
         .args([
-            "openai-planner.js",
+            script_path.to_string_lossy().as_ref(),
             goal,
             "--cwd",
             &cwd.to_string_lossy(),
         ])
+        .current_dir(cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?
@@ -354,12 +403,10 @@ async fn run_openai_planner(goal: &str) -> Result<(Vec<ReviewStory>, String, Str
         })
         .collect();
 
-    Ok((stories, prd.project, prd.branch_name))
+    Ok((stories, prd.project, prd.branch_name, prd.description))
 }
 
-/// Extract JSON object from text that might contain markdown fences or other wrapping
 fn extract_json(text: &str) -> String {
-    // Try to find JSON between ```json ... ``` or ``` ... ```
     if let Some(start) = text.find("```json") {
         let after = &text[start + 7..];
         if let Some(end) = after.find("```") {
@@ -373,7 +420,6 @@ fn extract_json(text: &str) -> String {
         }
     }
 
-    // Try to find a JSON object directly
     if let Some(start) = text.find('{') {
         if let Some(end) = text.rfind('}') {
             return text[start..=end].to_string();
