@@ -1,5 +1,6 @@
 mod app;
 mod events;
+mod screens;
 mod theme;
 mod ui;
 
@@ -15,7 +16,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
-use app::App;
+use app::{App, Screen};
 use events::BaroEvent;
 
 enum AppEvent {
@@ -57,6 +58,7 @@ async fn run_app(
     let mut app = App::new();
     let (tx, mut rx) = mpsc::channel::<AppEvent>(256);
 
+    // Stdin reader for execute mode (JSON events from pipe)
     let tx_stdin = tx.clone();
     tokio::spawn(async move {
         let stdin = tokio::io::stdin();
@@ -74,6 +76,7 @@ async fn run_app(
         }
     });
 
+    // Keyboard input from /dev/tty
     let tx_key = tx.clone();
     std::thread::spawn(move || loop {
         match crossterm::event::poll(Duration::from_millis(100)) {
@@ -87,6 +90,7 @@ async fn run_app(
         }
     });
 
+    // Tick timer
     let tx_tick = tx.clone();
     tokio::spawn(async move {
         loop {
@@ -101,8 +105,35 @@ async fn run_app(
             Some(AppEvent::Baro(ev)) => app.handle_event(ev),
             Some(AppEvent::Key(key)) => {
                 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+
+                match app.screen {
+                    Screen::Welcome => match key.code {
+                        KeyCode::Esc => return Ok(()),
+                        KeyCode::Enter => {
+                            if !app.goal_input.is_empty() {
+                                app.start_planning();
+                            }
+                        }
+                        KeyCode::Char(c) => app.goal_input.push(c),
+                        KeyCode::Backspace => { app.goal_input.pop(); }
+                        KeyCode::Left | KeyCode::Right => app.toggle_planner(),
+                        _ => {}
+                    },
+                    Screen::Planning => match key.code {
+                        KeyCode::Esc | KeyCode::Char('q') => return Ok(()),
+                        _ => {}
+                    },
+                    Screen::Review => match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Enter => app.start_execution(),
+                        KeyCode::Up | KeyCode::Char('k') => app.review_prev(),
+                        KeyCode::Down | KeyCode::Char('j') => app.review_next(),
+                        _ => {}
+                    },
+                    Screen::Execute => match key.code {
                         KeyCode::Char('q') => return Ok(()),
                         KeyCode::Char('1') => app.global_tab = app::GlobalTab::Dashboard,
                         KeyCode::Char('2') => app.global_tab = app::GlobalTab::Dag,
@@ -115,10 +146,14 @@ async fn run_app(
                         KeyCode::Left => app.prev_tab(),
                         KeyCode::Right => app.next_tab(),
                         _ => {}
-                    }
+                    },
                 }
             }
-            Some(AppEvent::StdinClosed) => { if !app.done { app.done = true; } }
+            Some(AppEvent::StdinClosed) => {
+                if app.screen == Screen::Execute && !app.done {
+                    app.done = true;
+                }
+            }
             Some(AppEvent::Tick) => { app.tick_count += 1; }
             None => break,
         }

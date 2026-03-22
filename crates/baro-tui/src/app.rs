@@ -8,6 +8,20 @@ use crate::events::{BaroEvent, DoneStats};
 const MAX_LOG_LINES: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Screen {
+    Welcome,
+    Planning,
+    Review,
+    Execute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Planner {
+    Claude,
+    OpenAI,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GlobalTab {
     Dashboard,
     Dag,
@@ -70,7 +84,29 @@ pub struct ActiveStory {
     pub start_time: Instant,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReviewStory {
+    pub title: String,
+    pub description: String,
+    pub depends_on: Vec<String>,
+}
+
 pub struct App {
+    // Screen state
+    pub screen: Screen,
+    pub planner: Planner,
+
+    // Welcome screen
+    pub goal_input: String,
+
+    // Planning screen
+    pub planning_start: Option<Instant>,
+
+    // Review screen
+    pub review_stories: Vec<ReviewStory>,
+    pub review_scroll: usize,
+
+    // Execute screen
     pub project: String,
     pub stories: Vec<StoryState>,
     pub dag_levels: Vec<Vec<String>>,
@@ -93,6 +129,16 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         Self {
+            screen: Screen::Welcome,
+            planner: Planner::Claude,
+
+            goal_input: String::new(),
+
+            planning_start: None,
+
+            review_stories: Vec::new(),
+            review_scroll: 0,
+
             project: String::new(),
             stories: Vec::new(),
             dag_levels: Vec::new(),
@@ -115,6 +161,38 @@ impl App {
         self.tick_count += 1;
     }
 
+    // Screen transitions
+    pub fn start_planning(&mut self) {
+        self.screen = Screen::Planning;
+        self.planning_start = Some(Instant::now());
+    }
+
+    pub fn show_review(&mut self, stories: Vec<ReviewStory>) {
+        self.review_stories = stories;
+        self.review_scroll = 0;
+        self.screen = Screen::Review;
+    }
+
+    pub fn start_execution(&mut self) {
+        self.screen = Screen::Execute;
+        self.start_time = Instant::now();
+    }
+
+    pub fn planning_elapsed_secs(&self) -> u64 {
+        self.planning_start
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0)
+    }
+
+    // Planner toggle
+    pub fn toggle_planner(&mut self) {
+        self.planner = match self.planner {
+            Planner::Claude => Planner::OpenAI,
+            Planner::OpenAI => Planner::Claude,
+        };
+    }
+
+    // Execute screen tab navigation
     pub fn next_tab(&mut self) {
         self.global_tab = self.global_tab.next();
     }
@@ -145,6 +223,17 @@ impl App {
         let mut ids: Vec<String> = self.active_stories.keys().cloned().collect();
         ids.sort();
         ids
+    }
+
+    // Review screen navigation
+    pub fn review_next(&mut self) {
+        if !self.review_stories.is_empty() {
+            self.review_scroll = (self.review_scroll + 1).min(self.review_stories.len() - 1);
+        }
+    }
+
+    pub fn review_prev(&mut self) {
+        self.review_scroll = self.review_scroll.saturating_sub(1);
     }
 
     pub fn handle_event(&mut self, event: BaroEvent) {
