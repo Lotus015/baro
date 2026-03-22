@@ -8,22 +8,22 @@ permissions:
   contents: write
 
 jobs:
-  build-tui:
+  build-binary:
     strategy:
       matrix:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: baro-tui-darwin-arm64
+            artifact: baro-darwin-arm64
           - os: macos-15
             target: x86_64-apple-darwin
-            artifact: baro-tui-darwin-x64
+            artifact: baro-darwin-x64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: baro-tui-linux-x64
+            artifact: baro-linux-x64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            artifact: baro-tui-linux-arm64
+            artifact: baro-linux-arm64
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -46,7 +46,7 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
       - name: Rename binary
-        run: cp target/${{ matrix.target }}/release/baro-tui ${{ matrix.artifact }}
+        run: cp target/${{ matrix.target }}/release/baro ${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -55,7 +55,7 @@ jobs:
           path: ${{ matrix.artifact }}
 
   publish:
-    needs: build-tui
+    needs: build-binary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,11 +76,11 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Install & build TypeScript
+      - name: Build OpenAI planner bundle
         working-directory: packages/baro-app
         run: |
           npm install
-          npx tsup src/cli.tsx src/core/executor.ts --format esm --external ink --external react --external ink-spinner
+          npx tsup src/core/openai-planner.ts --format esm
 
       - name: Publish to npm
         working-directory: packages/baro-app

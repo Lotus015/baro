@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "baro-tui"
+name = "baro"
 path = "src/main.rs"
 
 [dependencies]

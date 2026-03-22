@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * Postinstall script - downloads the baro-tui binary for the current platform.
+ * Postinstall script - downloads the baro binary for the current platform.
  * Binary is fetched from GitHub Releases.
  */
 
-import { execSync } from "child_process"
 import * as fs from "fs"
 import * as path from "path"
 import { fileURLToPath } from "url"
@@ -13,12 +12,12 @@ import * as https from "https"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PACKAGE_ROOT = path.resolve(__dirname, "..")
 const BIN_DIR = path.join(PACKAGE_ROOT, "bin")
-const BINARY_NAME = "baro-tui"
+const BINARY_NAME = "baro"
 const REPO = "Lotus015/baro"
 
 function getPlatformKey() {
-    const platform = process.platform   // darwin, linux, win32
-    const arch = process.arch           // arm64, x64
+    const platform = process.platform
+    const arch = process.arch
 
     const map = {
         "darwin-arm64": "darwin-arm64",
@@ -29,9 +28,9 @@ function getPlatformKey() {
 
     const key = `${platform}-${arch}`
     if (!map[key]) {
-        console.warn(`⚠ baro-tui: no prebuilt binary for ${key}. Execution dashboard won't be available.`)
-        console.warn(`  You can build it manually: cargo build --release in the baro repo.`)
-        process.exit(0) // Don't fail install
+        console.warn(`Warning: no prebuilt baro binary for ${key}.`)
+        console.warn(`  You can build it manually: cargo build --release -p baro-tui`)
+        process.exit(0)
     }
     return map[key]
 }
@@ -64,7 +63,6 @@ async function download(url, dest) {
 }
 
 async function main() {
-    // Skip if binary already exists (e.g. local dev)
     const binaryPath = path.join(BIN_DIR, BINARY_NAME)
     if (fs.existsSync(binaryPath)) {
         return
@@ -75,19 +73,17 @@ async function main() {
 
     const url = `https://github.com/${REPO}/releases/download/v${version}/${BINARY_NAME}-${platformKey}`
 
-    console.log(`Downloading baro-tui for ${platformKey}...`)
+    console.log(`Downloading baro for ${platformKey}...`)
 
     fs.mkdirSync(BIN_DIR, { recursive: true })
 
     try {
         await download(url, binaryPath)
         fs.chmodSync(binaryPath, 0o755)
-        console.log(`✓ baro-tui installed`)
+        console.log(`baro installed successfully`)
     } catch (err) {
-        console.warn(`⚠ Could not download baro-tui: ${err.message}`)
-        console.warn(`  Planning will work. Execution dashboard requires the binary.`)
-        console.warn(`  Build manually: cargo build --release`)
-        // Don't fail the install
+        console.warn(`Warning: Could not download baro: ${err.message}`)
+        console.warn(`  Build manually: cargo build --release -p baro-tui`)
     }
 }
 
