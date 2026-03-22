@@ -124,6 +124,9 @@ pub struct App {
     pub final_stats: Option<DoneStats>,
     pub total_time_secs: u64,
 
+    // Parallelism tracking (for sparkline)
+    pub parallelism_history: Vec<u64>,
+
     // UI state
     pub global_tab: GlobalTab,
     pub selected_log_index: usize,
@@ -158,6 +161,7 @@ impl App {
             done: false,
             final_stats: None,
             total_time_secs: 0,
+            parallelism_history: Vec::new(),
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
             tick_count: 0,

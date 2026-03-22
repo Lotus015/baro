@@ -249,7 +249,17 @@ async fn run_app(
                     },
                 }
             }
-            Some(AppEvent::Tick) => { app.tick_count += 1; }
+            Some(AppEvent::Tick) => {
+                app.tick_count += 1;
+                // Record parallelism every ~1s (every 10 ticks at 100ms)
+                if app.screen == Screen::Execute && app.tick_count % 10 == 0 {
+                    app.parallelism_history.push(app.active_stories.len() as u64);
+                    // Keep last 120 samples (2 minutes at 1/sec)
+                    if app.parallelism_history.len() > 120 {
+                        app.parallelism_history.remove(0);
+                    }
+                }
+            }
             None => break,
         }
     }

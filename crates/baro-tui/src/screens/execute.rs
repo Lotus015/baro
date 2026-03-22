@@ -3,8 +3,8 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Gauge, List, ListItem, Paragraph, Row, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Table, Tabs, Wrap,
+        BarChart, Block, Borders, Gauge, List, ListItem, Paragraph, Row, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Sparkline, Table, Tabs, Wrap,
     },
     Frame,
 };
@@ -313,18 +313,47 @@ fn render_dag_full(f: &mut Frame, app: &App, area: Rect) {
         )));
     } else {
         for (i, level) in app.dag_levels.iter().enumerate() {
+            // Level header with box
+            let level_label = format!(" Level {} ", i);
+            let story_count = level.len();
             lines.push(Line::from(vec![
+                Span::styled("  \u{250c}", Style::default().fg(theme::ACCENT_DIM)),
                 Span::styled(
-                    format!("  Level {} ", i),
-                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                    "\u{2500}".repeat(level_label.len()),
+                    Style::default().fg(theme::ACCENT_DIM),
                 ),
+                Span::styled("\u{2510}", Style::default().fg(theme::ACCENT_DIM)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  \u{2502}", Style::default().fg(theme::ACCENT_DIM)),
                 Span::styled(
-                    format!("({} stories)", level.len()),
+                    level_label.clone(),
+                    Style::default()
+                        .fg(theme::ACCENT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("\u{2502}", Style::default().fg(theme::ACCENT_DIM)),
+                Span::styled(
+                    format!("  {} {}", story_count, if story_count == 1 { "story" } else { "stories" }),
                     Style::default().fg(theme::MUTED),
                 ),
+                if story_count > 1 {
+                    Span::styled(" (parallel)", Style::default().fg(theme::ACCENT_DIM))
+                } else {
+                    Span::raw("")
+                },
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  \u{2514}", Style::default().fg(theme::ACCENT_DIM)),
+                Span::styled(
+                    "\u{2500}".repeat(level_label.len()),
+                    Style::default().fg(theme::ACCENT_DIM),
+                ),
+                Span::styled("\u{2518}", Style::default().fg(theme::ACCENT_DIM)),
             ]));
 
-            for story_id in level {
+            // Stories as cards
+            for (j, story_id) in level.iter().enumerate() {
                 if let Some(story) = app.stories.iter().find(|s| s.id == *story_id) {
                     let (icon, color) = status_icon_color(&story.status);
                     let duration = story
@@ -332,29 +361,57 @@ fn render_dag_full(f: &mut Frame, app: &App, area: Rect) {
                         .map(|d| format!(" {}:{:02}", d / 60, d % 60))
                         .unwrap_or_default();
 
-                    let deps = if story.depends_on.is_empty() {
-                        String::new()
+                    // Connector from level box to story
+                    let connector = if j == 0 && level.len() == 1 {
+                        "  \u{2502}   \u{2514}\u{2500}\u{2500} "
+                    } else if j == 0 {
+                        "  \u{2502}   \u{251c}\u{2500}\u{2500} "
+                    } else if j == level.len() - 1 {
+                        "  \u{2502}   \u{2514}\u{2500}\u{2500} "
                     } else {
-                        format!(" \u{2190} {}", story.depends_on.join(", "))
+                        "  \u{2502}   \u{251c}\u{2500}\u{2500} "
                     };
 
-                    lines.push(Line::from(vec![
-                        Span::raw("    "),
+                    let mut spans = vec![
+                        Span::styled(connector, Style::default().fg(theme::BORDER)),
                         Span::styled(
-                            format!("{} {}", icon, story.id),
-                            Style::default().fg(color).add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            format!(": {}", story.title),
+                            format!("{} ", icon),
                             Style::default().fg(color),
                         ),
-                        Span::styled(duration, Style::default().fg(theme::SUCCESS)),
-                        Span::styled(deps, Style::default().fg(theme::MUTED)),
-                    ]));
+                        Span::styled(
+                            format!("{}", story.id),
+                            Style::default()
+                                .fg(color)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!(" {}", story.title),
+                            Style::default().fg(color),
+                        ),
+                    ];
+
+                    if !duration.is_empty() {
+                        spans.push(Span::styled(
+                            duration,
+                            Style::default().fg(theme::SUCCESS),
+                        ));
+                    }
+
+                    if !story.depends_on.is_empty() {
+                        spans.push(Span::styled(
+                            format!("  \u{2190} {}", story.depends_on.join(", ")),
+                            Style::default().fg(theme::MUTED),
+                        ));
+                    }
+
+                    lines.push(Line::from(spans));
 
                     if let Some(ref err) = story.error {
                         lines.push(Line::from(vec![
-                            Span::raw("         "),
+                            Span::styled(
+                                "  \u{2502}        ",
+                                Style::default().fg(theme::BORDER),
+                            ),
                             Span::styled(
                                 format!("\u{26a0} {}", err),
                                 Style::default().fg(theme::ERROR),
@@ -364,16 +421,19 @@ fn render_dag_full(f: &mut Frame, app: &App, area: Rect) {
                 }
             }
 
+            // Arrow between levels
             if i < app.dag_levels.len() - 1 {
                 lines.push(Line::from(Span::styled(
-                    "    \u{2502}",
-                    Style::default().fg(theme::MUTED),
+                    "  \u{2502}",
+                    Style::default().fg(theme::BORDER),
                 )));
                 lines.push(Line::from(Span::styled(
-                    "    \u{25bc}",
-                    Style::default().fg(theme::MUTED),
+                    "  \u{25bc}",
+                    Style::default().fg(theme::ACCENT_DIM),
                 )));
             }
+
+            lines.push(Line::from(""));
         }
     }
 
@@ -382,7 +442,9 @@ fn render_dag_full(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(theme::BORDER))
         .title(Span::styled(
             " Dependency Graph ",
-            Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
         ));
 
     let p = Paragraph::new(lines).block(block);
@@ -392,12 +454,21 @@ fn render_dag_full(f: &mut Frame, app: &App, area: Rect) {
 // --- Tab 3: Stats Full View ---
 
 fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
+    let has_bar_data = app.stories.iter().any(|s| s.duration_secs.is_some());
+    let has_sparkline = app.parallelism_history.len() > 1;
+
+    let mut constraints = vec![Constraint::Length(6)]; // Summary
+    if has_sparkline {
+        constraints.push(Constraint::Length(5)); // Sparkline
+    }
+    if has_bar_data {
+        constraints.push(Constraint::Length(10)); // Bar chart
+    }
+    constraints.push(Constraint::Min(4)); // Table
+
     let stats_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(8),
-            Constraint::Min(4),
-        ])
+        .constraints(constraints)
         .split(area);
 
     let elapsed = app.elapsed_secs();
@@ -424,26 +495,26 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or(0);
     let total_files_created: u32 = app.stories.iter().map(|s| s.files_created).sum();
     let total_files_modified: u32 = app.stories.iter().map(|s| s.files_modified).sum();
-
     let final_stats = app.final_stats.as_ref();
 
+    // ── Summary ──
     let summary_lines = vec![
-        Line::from(""),
         Line::from(vec![
             Span::styled("  Stories: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!("{}", app.completed),
-                Style::default().fg(theme::SUCCESS).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::SUCCESS)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                format!("/{} complete", app.total),
-                Style::default().fg(theme::MUTED),
-            ),
+            Span::styled(format!("/{}", app.total), Style::default().fg(theme::MUTED)),
             Span::styled("    ", Style::default()),
             Span::styled("Time: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!("{}:{:02}", elapsed / 60, elapsed % 60),
-                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("    ", Style::default()),
             Span::styled("Avg: ", Style::default().fg(theme::MUTED)),
@@ -451,45 +522,47 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
                 format!("{}:{:02}", avg / 60, avg % 60),
                 Style::default().fg(theme::ACCENT),
             ),
-        ]),
-        Line::from(vec![
-            Span::styled("  Fastest: ", Style::default().fg(theme::MUTED)),
+            Span::styled("    ", Style::default()),
+            Span::styled("Fast: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!("{}:{:02}", fastest / 60, fastest % 60),
                 Style::default().fg(theme::SUCCESS),
             ),
-            Span::styled("    ", Style::default()),
-            Span::styled("Slowest: ", Style::default().fg(theme::MUTED)),
+            Span::styled("  Slow: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!("{}:{:02}", slowest / 60, slowest % 60),
                 Style::default().fg(theme::WARNING),
             ),
-            Span::styled("    ", Style::default()),
-            Span::styled("Files: ", Style::default().fg(theme::MUTED)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Files: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!("+{} ~{}", total_files_created, total_files_modified),
                 Style::default().fg(theme::ACCENT),
             ),
-        ]),
-        Line::from(vec![
-            Span::styled("  Skipped: ", Style::default().fg(theme::MUTED)),
+            Span::styled("    ", Style::default()),
+            Span::styled("Skipped: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!(
                     "{}",
                     final_stats.map(|s| s.stories_skipped).unwrap_or(0)
                 ),
-                Style::default().fg(if final_stats.map(|s| s.stories_skipped).unwrap_or(0) > 0 {
-                    theme::ERROR
-                } else {
-                    theme::SUCCESS
-                }),
+                Style::default().fg(
+                    if final_stats.map(|s| s.stories_skipped).unwrap_or(0) > 0 {
+                        theme::ERROR
+                    } else {
+                        theme::SUCCESS
+                    },
+                ),
             ),
             Span::styled("    ", Style::default()),
             Span::styled("Commits: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 format!(
                     "{}",
-                    final_stats.map(|s| s.total_commits).unwrap_or(app.completed)
+                    final_stats
+                        .map(|s| s.total_commits)
+                        .unwrap_or(app.completed)
                 ),
                 Style::default().fg(theme::ACCENT),
             ),
@@ -502,21 +575,85 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
             .border_style(Style::default().fg(theme::BORDER))
             .title(Span::styled(
                 " Summary ",
-                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
             )),
     );
     f.render_widget(summary, stats_chunks[0]);
 
-    let header = Row::new(vec![
-        "  ID",
-        "Title",
-        "Status",
-        "Time",
-        "Files",
-        "Deps",
-    ])
-    .style(
-        Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+    // ── Sparkline: parallelism over time ──
+    let mut next_chunk = 1;
+    if has_sparkline {
+        let max_val = app
+            .parallelism_history
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(1);
+        let spark = Sparkline::default()
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme::BORDER))
+                    .title(Span::styled(
+                        format!(" Parallelism (max {}) ", max_val),
+                        Style::default()
+                            .fg(theme::ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+            )
+            .data(&app.parallelism_history)
+            .style(Style::default().fg(theme::LOGO_2));
+        f.render_widget(spark, stats_chunks[next_chunk]);
+        next_chunk += 1;
+    }
+
+    // ── Bar chart of story durations ──
+    if has_bar_data {
+        let bar_data: Vec<(String, u64)> = app
+            .stories
+            .iter()
+            .filter_map(|s| s.duration_secs.map(|d| (s.id.clone(), d)))
+            .collect();
+
+        let bar_items: Vec<(&str, u64)> =
+            bar_data.iter().map(|(id, d)| (id.as_str(), *d)).collect();
+
+        let chart = BarChart::default()
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme::BORDER))
+                    .title(Span::styled(
+                        " Duration (seconds) ",
+                        Style::default()
+                            .fg(theme::ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+            )
+            .data(&bar_items)
+            .bar_width(5)
+            .bar_gap(1)
+            .bar_style(Style::default().fg(theme::ACCENT))
+            .value_style(
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .label_style(Style::default().fg(theme::TEXT_DIM));
+
+        f.render_widget(chart, stats_chunks[next_chunk]);
+        next_chunk += 1;
+    }
+
+    let table_chunk_idx = next_chunk;
+
+    // ── Story table ──
+    let header = Row::new(vec!["  ID", "Title", "Status", "Time", "Files", "Deps"]).style(
+        Style::default()
+            .fg(theme::ACCENT)
+            .add_modifier(Modifier::BOLD),
     );
 
     let rows: Vec<Row> = app
@@ -578,19 +715,19 @@ fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(10),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::BORDER))
-                .title(Span::styled(
-                    " Stories ",
-                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
-                )),
-        );
+    let table = Table::new(rows, widths).header(header).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::BORDER))
+            .title(Span::styled(
+                " Stories ",
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )),
+    );
 
-    f.render_widget(table, stats_chunks[1]);
+    f.render_widget(table, stats_chunks[table_chunk_idx]);
 }
 
 // --- Shared: Progress Bar ---

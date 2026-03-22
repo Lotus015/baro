@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, LineGauge, Paragraph},
     Frame,
 };
 
@@ -33,7 +33,9 @@ pub fn render(f: &mut Frame, app: &App) {
         .constraints([
             Constraint::Min(2),
             Constraint::Length(7),   // Central box
-            Constraint::Length(2),   // Spacer
+            Constraint::Length(1),   // Spacer
+            Constraint::Length(1),   // LineGauge
+            Constraint::Length(1),   // Spacer
             Constraint::Length(1),   // Hint
             Constraint::Min(1),
         ])
@@ -96,7 +98,7 @@ pub fn render(f: &mut Frame, app: &App) {
             Span::styled(" quit", Style::default().fg(theme::MUTED)),
         ]))
         .alignment(Alignment::Center);
-        f.render_widget(hint, chunks[3]);
+        f.render_widget(hint, chunks[5]);
     } else {
         // Planning in progress
         let frame_idx = (app.tick_count / 2) as usize % SPINNER_FRAMES.len();
@@ -153,12 +155,33 @@ pub fn render(f: &mut Frame, app: &App) {
         let p = Paragraph::new(lines).block(block);
         f.render_widget(p, box_area);
 
+        // Pulsing LineGauge (indeterminate progress)
+        let gauge_width = 40.min(area.width.saturating_sub(4));
+        let gauge_area = center(chunks[3], gauge_width);
+
+        // Animate: a "wave" that moves back and forth
+        let cycle = (app.tick_count % 40) as f64 / 40.0;
+        let ratio = (std::f64::consts::PI * 2.0 * cycle).sin().abs();
+
+        let gauge_color = match (app.tick_count / 8) % 3 {
+            0 => theme::LOGO_1,
+            1 => theme::LOGO_2,
+            _ => theme::LOGO_3,
+        };
+
+        let gauge = LineGauge::default()
+            .ratio(ratio)
+            .line_set(ratatui::symbols::line::THICK)
+            .filled_style(Style::default().fg(gauge_color))
+            .unfilled_style(Style::default().fg(theme::BORDER));
+        f.render_widget(gauge, gauge_area);
+
         // Hint
         let hint = Paragraph::new(Line::from(vec![
             Span::styled("Esc", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
             Span::styled(" cancel", Style::default().fg(theme::MUTED)),
         ]))
         .alignment(Alignment::Center);
-        f.render_widget(hint, chunks[3]);
+        f.render_widget(hint, chunks[5]);
     }
 }
