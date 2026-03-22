@@ -9,7 +9,9 @@ export interface StreamOptions {
     task: string
     onToken: (token: string) => void
     onToolCall?: (name: string, args: string) => void
+    onThinking?: (text: string) => void
     jsonSchema?: Record<string, any>
+    reasoning?: { effort: "low" | "medium" | "high" }
 }
 
 export async function streamCompletion(opts: StreamOptions): Promise<string> {
@@ -28,6 +30,11 @@ export async function streamCompletion(opts: StreamOptions): Promise<string> {
             { role: "user", content: opts.task },
         ],
         stream: true,
+    }
+
+    // Enable reasoning/thinking for better planning
+    if (opts.reasoning) {
+        body.reasoning = opts.reasoning
     }
 
     // If structured output requested, use text format with json instruction
@@ -93,6 +100,11 @@ export async function streamCompletion(opts: StreamOptions): Promise<string> {
                     const delta = event.delta ?? ""
                     fullText += delta
                     opts.onToken(delta)
+                } else if (event.type === "response.reasoning.delta") {
+                    // Thinking/reasoning tokens
+                    if (opts.onThinking) {
+                        opts.onThinking(event.delta ?? "")
+                    }
                 } else if (event.type === "response.function_call_arguments.delta") {
                     // Tool call streaming
                 } else if (event.type === "response.output_item.added") {

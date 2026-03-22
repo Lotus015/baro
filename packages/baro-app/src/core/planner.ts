@@ -71,7 +71,7 @@ export class Planner {
     private onToken?: (token: string) => void
 
     constructor(options: PlannerOptions = {}) {
-        this.model = options.model ?? "gpt-5-mini"
+        this.model = options.model ?? "gpt-5.4"
         this.onToken = options.onToken
         this.messages = [{ role: "system", content: SYSTEM_PROMPT }]
 
@@ -97,6 +97,7 @@ export class Planner {
             messages: this.messages,
             task: userMessage,
             jsonSchema: schema,
+            reasoning: { effort: "high" },
             onToken: this.onToken ?? (() => {}),
         })
 

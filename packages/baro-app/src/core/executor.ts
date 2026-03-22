@@ -54,9 +54,39 @@ async function main() {
                     const task = new CliTask({
                         id: story.id,
                         command: "claude",
-                        args: ["--dangerously-skip-permissions", "--output-format", "json", "-p", prompt],
+                        args: ["--dangerously-skip-permissions", "--output-format", "stream-json", "-p", prompt],
                         cwd,
-                        onStdout: (line) => emit({ type: "story_log", id: story.id, line }),
+                        onStdout: (line) => {
+                            // Parse stream-json events for display
+                            try {
+                                const ev = JSON.parse(line)
+                                if (ev.type === "assistant" && ev.message?.content) {
+                                    for (const block of ev.message.content) {
+                                        if (block.type === "text" && block.text) {
+                                            // Show text output lines
+                                            for (const l of block.text.split("\n").filter(Boolean)) {
+                                                emit({ type: "story_log", id: story.id, line: l })
+                                            }
+                                        } else if (block.type === "tool_use") {
+                                            emit({ type: "story_log", id: story.id, line: `⚙ ${block.name}: ${JSON.stringify(block.input).slice(0, 100)}` })
+                                        } else if (block.type === "tool_result") {
+                                            // Show truncated tool results
+                                            const text = typeof block.content === "string" ? block.content : JSON.stringify(block.content)
+                                            if (text.length > 0) {
+                                                emit({ type: "story_log", id: story.id, line: text.slice(0, 150) })
+                                            }
+                                        }
+                                    }
+                                } else if (ev.type === "result") {
+                                    // Final result - can extract cost/duration later
+                                }
+                            } catch {
+                                // Non-JSON line, show as-is
+                                if (line.trim()) {
+                                    emit({ type: "story_log", id: story.id, line })
+                                }
+                            }
+                        },
                         onStderr: (line) => emit({ type: "story_log", id: story.id, line }),
                     })
 
