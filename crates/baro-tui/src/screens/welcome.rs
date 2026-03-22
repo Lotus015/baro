@@ -8,49 +8,56 @@ use ratatui::{
 
 use crate::app::App;
 
-// Each letter defined separately for individual coloring
-const LETTER_B: [&str; 7] = [
-    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+// Giant blocky letters - each is ~12 wide, 9 rows tall
+// Using double-width block chars for maximum chunkiness
+const LETTER_B: [&str; 9] = [
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
+    "\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
 ];
 
-const LETTER_A: [&str; 7] = [
-    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+const LETTER_A: [&str; 9] = [
+    "   \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   ",
+    "  \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
+    " \u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
 ];
 
-const LETTER_R: [&str; 7] = [
-    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
-    "\u{2588}\u{2588}\u{2580}  \u{2588}\u{2588}",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
-    "\u{2588}\u{2588}   \u{2588}\u{2588}",
+const LETTER_R: [&str; 9] = [
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}   ",
+    "\u{2588}\u{2588}\u{2588}  \u{2588}\u{2588}\u{2588}\u{2588}  ",
+    "\u{2588}\u{2588}\u{2588}   \u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
 ];
 
-const LETTER_O: [&str; 7] = [
-    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
-    "\u{2588}\u{2588}    \u{2588}\u{2588}",
-    "\u{2588}\u{2588}    \u{2588}\u{2588}",
-    "\u{2588}\u{2588}    \u{2588}\u{2588}",
-    "\u{2588}\u{2588}    \u{2588}\u{2588}",
-    "\u{2588}\u{2588}    \u{2588}\u{2588}",
-    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
+const LETTER_O: [&str; 9] = [
+    "  \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
+    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "\u{2588}\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    "\u{2588}\u{2588}\u{2588}\u{2588}    \u{2588}\u{2588}\u{2588}\u{2588}",
+    " \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
+    "  \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
 ];
 
-// Use ANSI colors that work in ALL terminals (including macOS Terminal.app)
-// Color::Rgb does NOT work in Terminal.app - it renders as gray
 fn rainbow(idx: usize) -> Color {
     match idx % 7 {
         0 => Color::LightRed,
@@ -72,18 +79,16 @@ pub fn render(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
-            Constraint::Length(7),  // Logo
-            Constraint::Length(1),  // Spacer
-            Constraint::Length(1),  // Tagline
-            Constraint::Length(1),  // Spacer
-            Constraint::Length(1),  // Separator
-            Constraint::Length(1),  // Spacer
-            Constraint::Length(3),  // Goal input
-            Constraint::Length(1),  // Spacer
-            Constraint::Length(3),  // Planner selector
-            Constraint::Length(2),  // Spacer
-            Constraint::Length(1),  // Help text
-            Constraint::Length(1),  // Version
+            Constraint::Length(9),   // Logo (9 rows)
+            Constraint::Length(1),   // Spacer
+            Constraint::Length(1),   // Tagline
+            Constraint::Length(2),   // Spacer
+            Constraint::Length(5),   // Goal input (tall like Claude Code)
+            Constraint::Length(1),   // Spacer
+            Constraint::Length(3),   // Planner selector
+            Constraint::Length(2),   // Spacer
+            Constraint::Length(1),   // Help text
+            Constraint::Length(1),   // Version
             Constraint::Min(1),
         ])
         .split(area);
@@ -100,13 +105,13 @@ pub fn render(f: &mut Frame, app: &App) {
             .split(area)[1]
     };
 
-    // ── Logo: each letter gets its own animated color ──
+    // ── Giant logo with animated rainbow ──
     let tick = app.tick_count as usize;
     let phase = tick / 3;
 
     let mut logo_lines: Vec<Line> = Vec::new();
-    for row in 0..7 {
-        let b_color = rainbow(phase + 0 + row);
+    for row in 0..9 {
+        let b_color = rainbow(phase + row);
         let a_color = rainbow(phase + 2 + row);
         let r_color = rainbow(phase + 4 + row);
         let o_color = rainbow(phase + 6 + row);
@@ -116,17 +121,17 @@ pub fn render(f: &mut Frame, app: &App) {
                 LETTER_B[row].to_string(),
                 Style::default().fg(b_color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ".to_string(), Style::default()),
+            Span::styled("   ".to_string(), Style::default()),
             Span::styled(
                 LETTER_A[row].to_string(),
                 Style::default().fg(a_color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ".to_string(), Style::default()),
+            Span::styled("   ".to_string(), Style::default()),
             Span::styled(
                 LETTER_R[row].to_string(),
                 Style::default().fg(r_color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ".to_string(), Style::default()),
+            Span::styled("   ".to_string(), Style::default()),
             Span::styled(
                 LETTER_O[row].to_string(),
                 Style::default().fg(o_color).add_modifier(Modifier::BOLD),
@@ -139,62 +144,72 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Tagline ──
     let tagline = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "autonomous ",
-            Style::default().fg(Color::Cyan),
-        ),
+        Span::styled("autonomous ", Style::default().fg(Color::Cyan)),
         Span::styled(
             "parallel ",
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            "coding",
-            Style::default().fg(Color::Cyan),
-        ),
+        Span::styled("coding", Style::default().fg(Color::Cyan)),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(tagline, chunks[3]);
 
-    // ── Separator ──
-    let sep_width = 50.min(w.saturating_sub(4));
-    let sep_str: String = std::iter::repeat_n('\u{2550}', sep_width as usize).collect();
-    let separator = Paragraph::new(Line::from(Span::styled(
-        sep_str,
-        Style::default().fg(Color::DarkGray),
-    )))
-    .alignment(Alignment::Center);
-    f.render_widget(separator, chunks[5]);
+    // ── Goal input (tall, like Claude Code) ──
+    let input_width = (w - 10).min(100);
+    let input_area = center(chunks[5], input_width);
 
-    // ── Goal input ──
-    let input_width = 70.min(w.saturating_sub(4));
-    let input_area = center(chunks[7], input_width);
+    // C64-style blinking block cursor
+    let cursor_visible = (app.tick_count / 5) % 2 == 0;
+    let cursor_char = if cursor_visible { "\u{2588}" } else { " " };
 
     let display_text = if app.goal_input.is_empty() {
-        Line::from(Span::styled(
-            " Describe what you want to build...",
-            Style::default().fg(Color::DarkGray),
-        ))
+        vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    " What do you want to build?  ".to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    cursor_char.to_string(),
+                    Style::default()
+                        .fg(Color::LightGreen)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+        ]
     } else {
-        Line::from(Span::styled(
-            format!(" {}", &app.goal_input),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ))
-    };
-
-    let border_color = if app.goal_input.is_empty() {
-        Color::Blue
-    } else {
-        Color::White
+        vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    format!(" {}", &app.goal_input),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    cursor_char.to_string(),
+                    Style::default()
+                        .fg(Color::LightGreen)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+        ]
     };
 
     let input = Paragraph::new(display_text).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color))
+            .border_style(Style::default().fg(if app.goal_input.is_empty() {
+                Color::Gray
+            } else {
+                Color::LightCyan
+            }))
             .title(Span::styled(
                 " Goal ",
                 Style::default()
@@ -204,15 +219,8 @@ pub fn render(f: &mut Frame, app: &App) {
     );
     f.render_widget(input, input_area);
 
-    // Cursor
-    let cursor_x = input_area.x + 2 + app.goal_input.len() as u16;
-    let cursor_y = input_area.y + 1;
-    if cursor_x < input_area.x + input_area.width - 1 {
-        f.set_cursor_position((cursor_x, cursor_y));
-    }
-
     // ── Planner selector ──
-    let planner_area = center(chunks[9], input_width);
+    let planner_area = center(chunks[7], input_width);
     let is_claude = app.planner == crate::app::Planner::Claude;
 
     let active_color = match (app.tick_count / 6) % 3 {
@@ -249,13 +257,13 @@ pub fn render(f: &mut Frame, app: &App) {
         Span::styled("              ".to_string(), Style::default()),
         Span::styled(
             "\u{2190}\u{2192} switch".to_string(),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(Color::DarkGray),
         ),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue))
+            .border_style(Style::default().fg(Color::Gray))
             .title(Span::styled(
                 " Planner ",
                 Style::default()
@@ -283,13 +291,13 @@ pub fn render(f: &mut Frame, app: &App) {
         Span::styled(" quit", Style::default().fg(Color::Gray)),
     ]))
     .alignment(Alignment::Center);
-    f.render_widget(help, chunks[11]);
+    f.render_widget(help, chunks[9]);
 
     // ── Version ──
     let version = Paragraph::new(Line::from(Span::styled(
-        "v0.3.7",
+        "v0.3.8",
         Style::default().fg(Color::DarkGray),
     )))
     .alignment(Alignment::Center);
-    f.render_widget(version, chunks[12]);
+    f.render_widget(version, chunks[10]);
 }
