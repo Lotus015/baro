@@ -170,6 +170,7 @@ pub fn render(f: &mut Frame, app: &App) {
         };
 
         let gauge = LineGauge::default()
+            .label("")
             .ratio(ratio)
             .line_set(ratatui::symbols::line::THICK)
             .filled_style(Style::default().fg(gauge_color))
