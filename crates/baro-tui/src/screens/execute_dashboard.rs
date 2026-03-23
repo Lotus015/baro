@@ -45,6 +45,16 @@ fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
                 }
             }
 
+            // Show review spinner after stories for this level
+            if app.review_in_progress && app.review_level == i {
+                let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+                let spinner = spinner_chars[(app.tick_count as usize) % spinner_chars.len()];
+                items.push(ListItem::new(Line::from(Span::styled(
+                    format!("   {} Reviewing Level {}...", spinner, i),
+                    Style::default().fg(ratatui::style::Color::Cyan),
+                ))));
+            }
+
             if i < app.dag_levels.len() - 1 {
                 items.push(ListItem::new(Line::from(Span::styled(
                     "   \u{2502}",
@@ -124,24 +134,57 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
     let active_ids = app.active_story_ids();
 
     if active_ids.is_empty() {
-        let msg = if app.done {
-            "All done!"
-        } else if app.stories.is_empty() {
-            "Waiting for events..."
-        } else {
-            "Waiting for next story..."
-        };
+        if app.review_in_progress && !app.review_logs.is_empty() {
+            let total_logs = app.review_logs.len();
+            let inner_height = area.height.saturating_sub(2) as usize;
+            let skip = total_logs.saturating_sub(inner_height);
+            let visible_logs: Vec<Line> = app.review_logs[skip..]
+                .iter()
+                .map(|l| Line::from(Span::styled(l.clone(), Style::default().fg(theme::TEXT))))
+                .collect();
 
-        let p = Paragraph::new(Span::styled(msg, Style::default().fg(theme::MUTED))).block(
-            Block::default()
+            let block = Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::BORDER))
+                .border_style(Style::default().fg(ratatui::style::Color::Cyan))
                 .title(Span::styled(
-                    " Logs ",
-                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
-                )),
-        );
-        f.render_widget(p, area);
+                    format!(" Review Level {} ", app.review_level),
+                    Style::default()
+                        .fg(ratatui::style::Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ));
+
+            let p = Paragraph::new(visible_logs)
+                .block(block)
+                .wrap(Wrap { trim: false });
+            f.render_widget(p, area);
+
+            if total_logs > inner_height {
+                let mut scrollbar_state =
+                    ScrollbarState::new(total_logs.saturating_sub(inner_height)).position(skip);
+                let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .style(Style::default().fg(ratatui::style::Color::Cyan));
+                f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+            }
+        } else {
+            let msg = if app.done {
+                "All done!"
+            } else if app.stories.is_empty() {
+                "Waiting for events..."
+            } else {
+                "Waiting for next story..."
+            };
+
+            let p = Paragraph::new(Span::styled(msg, Style::default().fg(theme::MUTED))).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme::BORDER))
+                    .title(Span::styled(
+                        " Logs ",
+                        Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                    )),
+            );
+            f.render_widget(p, area);
+        }
         return;
     }
 
