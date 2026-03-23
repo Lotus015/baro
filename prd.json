@@ -1,64 +1,64 @@
 {
-  "project": "baro-tui-dead-code-cleanup",
   "branchName": "cleanup-dead-code-tui",
   "description": "Remove #![allow(dead_code)] directives and fix all resulting compiler warnings in baro-tui",
+  "project": "baro-tui-dead-code-cleanup",
   "userStories": [
     {
-      "id": "S1",
-      "priority": 1,
-      "title": "Remove dead_code allow from theme.rs and delete unused constants",
+      "acceptance": [],
+      "completedAt": "2026-03-23T19:12:04.104146+00:00",
+      "dependsOn": [],
       "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/theme.rs. Run `cargo build 2>&1` to identify unused constants (likely SURFACE, TAB_ACTIVE, TAB_INACTIVE, RETRY, GAUGE_BG). Delete only the constants the compiler flags as unused. Run `cargo build` again to verify zero warnings from theme.rs.",
-      "dependsOn": [],
+      "durationSecs": 67,
+      "id": "S1",
+      "passes": true,
+      "priority": 1,
       "retries": 2,
-      "acceptance": [],
       "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "title": "Remove dead_code allow from theme.rs and delete unused constants"
     },
     {
-      "id": "S2",
-      "priority": 2,
-      "title": "Remove dead_code allow from events.rs and fix unused fields",
+      "acceptance": [],
+      "completedAt": "2026-03-23T19:12:34.301063+00:00",
+      "dependsOn": [],
       "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/events.rs. Run `cargo build 2>&1` to identify unused items. The `DagNode::title` field is constructed in executor.rs but never read (only `id` is extracted in app.rs). Either remove the field and update executor.rs to stop setting it, or keep it if serde deserialization requires it. Also check `StoryInfo` fields. Fix all warnings the compiler reports. Run `cargo build` again to verify zero warnings from events.rs.",
-      "dependsOn": [],
+      "durationSecs": 97,
+      "id": "S2",
+      "passes": true,
+      "priority": 2,
       "retries": 2,
-      "acceptance": [],
       "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "title": "Remove dead_code allow from events.rs and fix unused fields"
     },
     {
-      "id": "S3",
-      "priority": 3,
-      "title": "Remove dead_code allow from app.rs and fix unused items",
-      "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/app.rs. Run `cargo build 2>&1` to identify unused items. Known suspects: `App::tick()` method (unused — main.rs increments tick_count directly), `current_level` field (set internally via update_current_level() but never read by any screen renderer), possibly `update_current_level()` if current_level is removed. For each warning: if truly unused, delete it; if it should be used, wire it up. Run `cargo build` again to verify zero warnings from app.rs.",
+      "acceptance": [],
+      "completedAt": "2026-03-23T19:13:29.803776+00:00",
       "dependsOn": [
         "S1",
         "S2"
       ],
+      "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/app.rs. Run `cargo build 2>&1` to identify unused items. Known suspects: `App::tick()` method (unused — main.rs increments tick_count directly), `current_level` field (set internally via update_current_level() but never read by any screen renderer), possibly `update_current_level()` if current_level is removed. For each warning: if truly unused, delete it; if it should be used, wire it up. Run `cargo build` again to verify zero warnings from app.rs.",
+      "durationSecs": 54,
+      "id": "S3",
+      "passes": true,
+      "priority": 3,
       "retries": 2,
-      "acceptance": [],
       "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "title": "Remove dead_code allow from app.rs and fix unused items"
     },
     {
-      "id": "S4",
-      "priority": 4,
-      "title": "Verify full build has zero dead_code warnings",
-      "description": "Run `cargo build 2>&1` on the entire workspace and verify there are absolutely zero dead_code warnings remaining in crates/baro-tui/src/. Also verify no `#![allow(dead_code)]` directives remain in theme.rs, app.rs, or events.rs. If any warnings remain, fix them. Ensure the application still compiles successfully.",
+      "acceptance": [],
+      "completedAt": "2026-03-23T19:14:31.666869+00:00",
       "dependsOn": [
         "S3"
       ],
+      "description": "Run `cargo build 2>&1` on the entire workspace and verify there are absolutely zero dead_code warnings remaining in crates/baro-tui/src/. Also verify no `#![allow(dead_code)]` directives remain in theme.rs, app.rs, or events.rs. If any warnings remain, fix them. Ensure the application still compiles successfully.",
+      "durationSecs": 60,
+      "id": "S4",
+      "passes": true,
+      "priority": 4,
       "retries": 2,
-      "acceptance": [],
       "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "title": "Verify full build has zero dead_code warnings"
     }
   ]
 }
