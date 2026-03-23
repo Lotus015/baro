@@ -331,6 +331,340 @@ async fn run_claude_for_story(
     }
 }
 
+// ─── JSON extraction helper ─────────────────────────────────
+
+fn extract_json(text: &str) -> String {
+    if let Some(start) = text.find("```json") {
+        let after = &text[start + 7..];
+        if let Some(end) = after.find("```") {
+            return after[..end].trim().to_string();
+        }
+    }
+    if let Some(start) = text.find("```") {
+        let after = &text[start + 3..];
+        if let Some(end) = after.find("```") {
+            return after[..end].trim().to_string();
+        }
+    }
+    if let Some(start) = text.find('{') {
+        if let Some(end) = text.rfind('}') {
+            return text[start..=end].to_string();
+        }
+    }
+    text.trim().to_string()
+}
+
+// ─── Review agent ───────────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize)]
+struct ReviewResult {
+    passed: bool,
+    #[serde(default)]
+    fixes: Vec<ReviewFix>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ReviewFix {
+    title: String,
+    description: String,
+}
+
+async fn run_review_for_level(
+    saved_hash: &str,
+    cwd: &Path,
+    completed_stories: &[&PrdStory],
+    tx: &mpsc::Sender<BaroEvent>,
+    git_mutex: &Arc<Mutex<()>>,
+    prd_path: &Path,
+    level_index: usize,
+) {
+    let _ = tx
+        .send(BaroEvent::ReviewStart {
+            level: level_index,
+        })
+        .await;
+
+    let _ = tx
+        .send(BaroEvent::ReviewLog {
+            line: format!(
+                "Starting review for level {} ({} stories)",
+                level_index,
+                completed_stories.len()
+            ),
+        })
+        .await;
+
+    let max_cycles = 2;
+
+    for cycle in 0..max_cycles {
+        let _ = tx
+            .send(BaroEvent::ReviewLog {
+                line: format!("Review cycle {}/{}", cycle + 1, max_cycles),
+            })
+            .await;
+
+        // Get diff from saved hash to HEAD
+        let diff_output = {
+            let _git_lock = git_mutex.lock().await;
+            Command::new("git")
+                .args(["diff", saved_hash, "HEAD"])
+                .current_dir(cwd)
+                .output()
+                .await
+        };
+
+        let diff = match diff_output {
+            Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
+            Ok(out) => {
+                let _ = tx
+                    .send(BaroEvent::ReviewLog {
+                        line: format!(
+                            "git diff failed: {}",
+                            String::from_utf8_lossy(&out.stderr)
+                        ),
+                    })
+                    .await;
+                return;
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(BaroEvent::ReviewLog {
+                        line: format!("git diff error: {}", e),
+                    })
+                    .await;
+                return;
+            }
+        };
+
+        if diff.trim().is_empty() {
+            let _ = tx
+                .send(BaroEvent::ReviewLog {
+                    line: "No changes to review".to_string(),
+                })
+                .await;
+            let _ = tx
+                .send(BaroEvent::ReviewComplete {
+                    level: level_index,
+                    passed: true,
+                    fix_count: 0,
+                })
+                .await;
+            return;
+        }
+
+        // Collect acceptance criteria from completed stories
+        let mut criteria = String::new();
+        for story in completed_stories {
+            criteria.push_str(&format!("## Story {}: {}\n", story.id, story.title));
+            for ac in &story.acceptance {
+                criteria.push_str(&format!("- {}\n", ac));
+            }
+            criteria.push('\n');
+        }
+
+        // Build review prompt
+        let prompt = format!(
+            "You are a code reviewer. Review the following git diff against the acceptance criteria below.\n\n\
+             ACCEPTANCE CRITERIA:\n{}\n\n\
+             GIT DIFF:\n```\n{}\n```\n\n\
+             Respond with ONLY valid JSON (no markdown fences):\n\
+             {{\"passed\": boolean, \"fixes\": [{{\"title\": \"short title\", \"description\": \"what to fix and how\"}}]}}\n\n\
+             If all acceptance criteria are met and the code looks correct, set passed=true and fixes=[].\n\
+             If there are issues, set passed=false and list each fix needed.",
+            criteria,
+            if diff.len() > 50000 {
+                &diff[..50000]
+            } else {
+                &diff
+            }
+        );
+
+        let _ = tx
+            .send(BaroEvent::ReviewLog {
+                line: "Spawning Claude for review...".to_string(),
+            })
+            .await;
+
+        // Spawn claude for review
+        let child_result = Command::new("claude")
+            .args([
+                "--dangerously-skip-permissions",
+                "--output-format",
+                "json",
+                "-p",
+                &prompt,
+            ])
+            .current_dir(cwd)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
+
+        let child = match child_result {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx
+                    .send(BaroEvent::ReviewLog {
+                        line: format!("Failed to spawn claude for review: {}", e),
+                    })
+                    .await;
+                return;
+            }
+        };
+
+        let output = match child.wait_with_output().await {
+            Ok(o) => o,
+            Err(e) => {
+                let _ = tx
+                    .send(BaroEvent::ReviewLog {
+                        line: format!("Review claude process error: {}", e),
+                    })
+                    .await;
+                return;
+            }
+        };
+
+        if !output.status.success() {
+            let _ = tx
+                .send(BaroEvent::ReviewLog {
+                    line: format!(
+                        "Review claude exited with code {}",
+                        output.status.code().unwrap_or(-1)
+                    ),
+                })
+                .await;
+            return;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // Parse Claude JSON wrapper (like the planner does)
+        let result_text = match serde_json::from_str::<serde_json::Value>(&stdout) {
+            Ok(wrapper) => wrapper
+                .get("result")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&stdout)
+                .to_string(),
+            Err(_) => stdout.to_string(),
+        };
+
+        let json_str = extract_json(&result_text);
+        let review: ReviewResult = match serde_json::from_str(&json_str) {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = tx
+                    .send(BaroEvent::ReviewLog {
+                        line: format!(
+                            "Failed to parse review JSON: {}. Raw: {}",
+                            e,
+                            &json_str[..json_str.len().min(200)]
+                        ),
+                    })
+                    .await;
+                let _ = tx
+                    .send(BaroEvent::ReviewComplete {
+                        level: level_index,
+                        passed: false,
+                        fix_count: 0,
+                    })
+                    .await;
+                return;
+            }
+        };
+
+        if review.passed {
+            let _ = tx
+                .send(BaroEvent::ReviewLog {
+                    line: "Review passed!".to_string(),
+                })
+                .await;
+            let _ = tx
+                .send(BaroEvent::ReviewComplete {
+                    level: level_index,
+                    passed: true,
+                    fix_count: 0,
+                })
+                .await;
+            return;
+        }
+
+        // Review failed - create fix stories and execute them
+        let fix_count = review.fixes.len() as u32;
+        let _ = tx
+            .send(BaroEvent::ReviewLog {
+                line: format!(
+                    "Review failed with {} fixes needed (cycle {}/{})",
+                    fix_count,
+                    cycle + 1,
+                    max_cycles
+                ),
+            })
+            .await;
+
+        for (i, fix) in review.fixes.iter().enumerate() {
+            let fix_id = format!("S{}-fix{}", level_index, i + 1);
+            let _ = tx
+                .send(BaroEvent::ReviewLog {
+                    line: format!("Executing fix: {} - {}", fix_id, fix.title),
+                })
+                .await;
+
+            let fix_story = PrdStory {
+                id: fix_id.clone(),
+                priority: (i + 1) as i32,
+                title: fix.title.clone(),
+                description: fix.description.clone(),
+                depends_on: Vec::new(),
+                retries: 1,
+                acceptance: Vec::new(),
+                tests: Vec::new(),
+                passes: false,
+                completed_at: None,
+                duration_secs: None,
+            };
+
+            match execute_story(&fix_story, cwd, prd_path, tx, git_mutex).await {
+                Ok(_) => {
+                    let _ = tx
+                        .send(BaroEvent::ReviewLog {
+                            line: format!("Fix {} completed", fix_id),
+                        })
+                        .await;
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(BaroEvent::ReviewLog {
+                            line: format!("Fix {} failed: {}", fix_id, e),
+                        })
+                        .await;
+                }
+            }
+        }
+
+        // If this is the last cycle, emit warning and complete
+        if cycle == max_cycles - 1 {
+            let _ = tx
+                .send(BaroEvent::ReviewLog {
+                    line: format!(
+                        "Warning: review still failing after {} cycles, continuing",
+                        max_cycles
+                    ),
+                })
+                .await;
+            let _ = tx
+                .send(BaroEvent::ReviewComplete {
+                    level: level_index,
+                    passed: false,
+                    fix_count,
+                })
+                .await;
+            return;
+        }
+
+        // Otherwise loop for re-review with new diff
+    }
+}
+
 // ─── Main executor entry point ──────────────────────────────
 
 pub async fn run_executor(
@@ -405,7 +739,23 @@ pub async fn run_executor(
     let story_map: HashMap<&str, &PrdStory> =
         stories.iter().map(|s| (s.id.as_str(), s)).collect();
 
-    for level in &levels {
+    for (level_index, level) in levels.iter().enumerate() {
+        // Save current commit hash before executing stories in this level
+        let saved_hash = {
+            let _git_lock = git_mutex.lock().await;
+            let output = Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&cwd)
+                .output()
+                .await;
+            match output {
+                Ok(o) if o.status.success() => {
+                    String::from_utf8_lossy(&o.stdout).trim().to_string()
+                }
+                _ => String::new(),
+            }
+        };
+
         // All stories in a level run in parallel
         let mut handles = Vec::new();
 
@@ -425,6 +775,8 @@ pub async fn run_executor(
             handles.push((story_id.clone(), handle));
         }
 
+        let mut level_completed_ids: Vec<String> = Vec::new();
+
         for (story_id, handle) in handles {
             match handle.await {
                 Ok(Ok((duration_secs, files_created, files_modified))) => {
@@ -432,6 +784,7 @@ pub async fn run_executor(
                     total_files_created += files_created;
                     total_files_modified += files_modified;
                     total_commits += 1;
+                    level_completed_ids.push(story_id.clone());
 
                     let _ = tx
                         .send(BaroEvent::StoryComplete {
@@ -468,6 +821,25 @@ pub async fn run_executor(
                         .await;
                 }
             }
+        }
+
+        // Run review for this level if we have a saved hash and completed stories
+        if !saved_hash.is_empty() && !level_completed_ids.is_empty() {
+            let completed_stories: Vec<&PrdStory> = level_completed_ids
+                .iter()
+                .filter_map(|id| story_map.get(id.as_str()).copied())
+                .collect();
+
+            run_review_for_level(
+                &saved_hash,
+                &cwd,
+                &completed_stories,
+                &tx,
+                &git_mutex,
+                &prd_path,
+                level_index,
+            )
+            .await;
         }
     }
 
