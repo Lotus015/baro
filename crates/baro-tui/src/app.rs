@@ -125,9 +125,6 @@ pub struct App {
     // Push tracking
     pub push_results: Vec<(String, bool, Option<String>)>,
 
-    // Parallelism tracking (for sparkline)
-    pub parallelism_history: Vec<u64>,
-
     // UI state
     pub global_tab: GlobalTab,
     pub selected_log_index: usize,
@@ -163,7 +160,6 @@ impl App {
             final_stats: None,
             total_time_secs: 0,
             push_results: Vec::new(),
-            parallelism_history: Vec::new(),
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
             tick_count: 0,
