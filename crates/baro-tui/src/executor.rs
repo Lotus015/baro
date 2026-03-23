@@ -297,20 +297,15 @@ fn update_prd_story(prd_path: &Path, story_id: &str, duration_secs: u64) -> std:
     Ok(())
 }
 
-// ─── Auto-push after commit ─────────────────────────────────
+// ─── Push with retry ────────────────────────────────────────
 
-async fn auto_push(cwd: &Path) -> Result<(), String> {
-    // Check remote exists
-    let remote = Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(cwd)
-        .output()
-        .await
-        .map_err(|e| format!("Failed to check remote: {}", e))?;
-
-    if !remote.status.success() {
-        return Err("No remote 'origin' configured".to_string());
-    }
+async fn git_push_with_retry(
+    git_mutex: &Mutex<()>,
+    cwd: &Path,
+    story_id: &str,
+    tx: &mpsc::Sender<BaroEvent>,
+) -> Result<(), String> {
+    let _git_lock = git_mutex.lock().await;
 
     // Get current branch
     let branch = Command::new("git")
@@ -325,20 +320,77 @@ async fn auto_push(cwd: &Path) -> Result<(), String> {
         return Err("Could not determine current branch".to_string());
     }
 
-    // Push
-    let push = Command::new("git")
-        .args(["push", "origin", &branch_name])
-        .current_dir(cwd)
-        .output()
-        .await
-        .map_err(|e| format!("Failed to push: {}", e))?;
+    let max_attempts = 3;
+    for attempt in 1..=max_attempts {
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: story_id.to_string(),
+                line: "[git] pushing...".to_string(),
+            })
+            .await;
 
-    if push.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&push.stderr).trim().to_string();
-        Err(format!("Push failed: {}", stderr))
+        let push = Command::new("git")
+            .args(["push", "origin", &branch_name])
+            .current_dir(cwd)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to push: {}", e))?;
+
+        if push.status.success() {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: story_id.to_string(),
+                    line: "[git] push ok".to_string(),
+                })
+                .await;
+            return Ok(());
+        }
+
+        if attempt == max_attempts {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: story_id.to_string(),
+                    line: "[git] push failed after 3 attempts".to_string(),
+                })
+                .await;
+            let stderr = String::from_utf8_lossy(&push.stderr).trim().to_string();
+            return Err(format!("Push failed after 3 attempts: {}", stderr));
+        }
+
+        // Pull --rebase and retry
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: story_id.to_string(),
+                line: "[git] push failed, pulling and retrying...".to_string(),
+            })
+            .await;
+
+        let pull = Command::new("git")
+            .args(["pull", "--rebase", "origin", &branch_name])
+            .current_dir(cwd)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to pull --rebase: {}", e))?;
+
+        if !pull.status.success() {
+            // Rebase conflict — abort and return error
+            let _ = Command::new("git")
+                .args(["rebase", "--abort"])
+                .current_dir(cwd)
+                .output()
+                .await;
+
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: story_id.to_string(),
+                    line: "[git] conflict detected, skipping".to_string(),
+                })
+                .await;
+            return Err("Rebase conflict detected, push skipped".to_string());
+        }
     }
+
+    unreachable!()
 }
 
 // ─── Execute a single story ─────────────────────────────────
@@ -434,17 +486,20 @@ async fn execute_story(
 
         match result {
             Ok(()) => {
-                // Acquire git mutex for serialized git operations
-                let _git_lock = git_mutex.lock().await;
+                // Acquire git mutex for prd update and git stats
+                let (files_created, files_modified) = {
+                    let _git_lock = git_mutex.lock().await;
 
-                // Update prd.json
-                let _ = update_prd_story(prd_path, &story.id, duration_secs);
+                    // Update prd.json
+                    let _ = update_prd_story(prd_path, &story.id, duration_secs);
 
-                // Get git stats
-                let (files_created, files_modified) = get_git_file_stats(cwd).await;
+                    // Get git stats
+                    get_git_file_stats(cwd).await
+                };
 
-                // Auto-push
-                let push_result = auto_push(cwd).await;
+                // Push with retry (acquires git_mutex internally)
+                let push_result =
+                    git_push_with_retry(git_mutex, cwd, &story.id, tx).await;
                 let (push_success, push_error) = match &push_result {
                     Ok(()) => (true, None),
                     Err(e) => (false, Some(e.clone())),
@@ -456,8 +511,6 @@ async fn execute_story(
                         error: push_error,
                     })
                     .await;
-
-                drop(_git_lock);
 
                 return Ok((duration_secs, files_created, files_modified));
             }
@@ -707,35 +760,37 @@ pub async fn run_executor(
 
     // Final push of prd.json completion status
     let _prd_push = async {
-        let _git_lock = git_mutex.lock().await;
+        {
+            let _git_lock = git_mutex.lock().await;
 
-        let add = Command::new("git")
-            .args(["add", "prd.json"])
-            .current_dir(&cwd)
-            .output()
-            .await
-            .map_err(|e| format!("git add failed: {}", e))?;
-        if !add.status.success() {
-            return Err(format!(
-                "git add prd.json failed: {}",
-                String::from_utf8_lossy(&add.stderr)
-            ));
-        }
+            let add = Command::new("git")
+                .args(["add", "prd.json"])
+                .current_dir(&cwd)
+                .output()
+                .await
+                .map_err(|e| format!("git add failed: {}", e))?;
+            if !add.status.success() {
+                return Err(format!(
+                    "git add prd.json failed: {}",
+                    String::from_utf8_lossy(&add.stderr)
+                ));
+            }
 
-        let commit = Command::new("git")
-            .args(["commit", "-m", "chore: update prd.json completion status"])
-            .current_dir(&cwd)
-            .output()
-            .await
-            .map_err(|e| format!("git commit failed: {}", e))?;
-        if !commit.status.success() {
-            let stderr = String::from_utf8_lossy(&commit.stderr);
-            if !stderr.contains("nothing to commit") {
-                return Err(format!("git commit failed: {}", stderr));
+            let commit = Command::new("git")
+                .args(["commit", "-m", "chore: update prd.json completion status"])
+                .current_dir(&cwd)
+                .output()
+                .await
+                .map_err(|e| format!("git commit failed: {}", e))?;
+            if !commit.status.success() {
+                let stderr = String::from_utf8_lossy(&commit.stderr);
+                if !stderr.contains("nothing to commit") {
+                    return Err(format!("git commit failed: {}", stderr));
+                }
             }
         }
 
-        auto_push(&cwd).await
+        git_push_with_retry(&git_mutex, &cwd, "prd", &tx).await
     }
     .await;
 
