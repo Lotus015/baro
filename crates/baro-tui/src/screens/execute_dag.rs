@@ -87,7 +87,7 @@ pub fn render_dag_full(f: &mut Frame, app: &App, area: Rect) {
                             Style::default().fg(color),
                         ),
                         Span::styled(
-                            format!("{}", story.id),
+                            story.id.to_string(),
                             Style::default()
                                 .fg(color)
                                 .add_modifier(Modifier::BOLD),

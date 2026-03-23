@@ -162,7 +162,7 @@ pub fn render(f: &mut Frame, app: &App) {
     let input_area = center(chunks[5], input_width);
 
     // C64-style blinking block cursor
-    let cursor_visible = (app.tick_count / 5) % 2 == 0;
+    let cursor_visible = (app.tick_count / 5).is_multiple_of(2);
     let cursor_char = if cursor_visible { "\u{2588}" } else { " " };
 
     let display_text = if app.goal_input.is_empty() {

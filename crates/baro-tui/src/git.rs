@@ -69,7 +69,7 @@ pub(crate) fn update_prd_story(prd_path: &Path, story_id: &str, duration_secs: u
     }
 
     let output = serde_json::to_string_pretty(&prd)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
     std::fs::write(prd_path, format!("{}\n", output))?;
     Ok(())
 }

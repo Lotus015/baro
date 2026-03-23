@@ -9,7 +9,7 @@ mod ui;
 
 use std::fs::OpenOptions;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::Parser;
@@ -263,10 +263,10 @@ async fn run_app(
     Ok(())
 }
 
-fn spawn_planner(app: &App, cwd: &PathBuf, tx: mpsc::Sender<AppEvent>) {
+fn spawn_planner(app: &App, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
     let goal = app.goal_input.clone();
     let planner = app.planner;
-    let cwd = cwd.clone();
+    let cwd = cwd.to_path_buf();
 
     tokio::spawn(async move {
         let result = match planner {
@@ -305,7 +305,7 @@ fn spawn_executor(prd: executor::PrdFile, cwd: PathBuf, tx: mpsc::Sender<AppEven
     });
 }
 
-async fn run_claude_planner(goal: &str, cwd: &PathBuf) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
+async fn run_claude_planner(goal: &str, cwd: &Path) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
     let prompt = format!("{}\n\nUser goal: {}", CLAUDE_PLANNER_PROMPT, goal);
 
     let output = Command::new("claude")
@@ -357,7 +357,7 @@ async fn run_claude_planner(goal: &str, cwd: &PathBuf) -> Result<(Vec<ReviewStor
     Ok((stories, prd.project, prd.branch_name, prd.description))
 }
 
-async fn run_openai_planner(goal: &str, cwd: &PathBuf) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
+async fn run_openai_planner(goal: &str, cwd: &Path) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
     // Find the openai-planner.js relative to the binary or use node_modules
     let exe_dir = std::env::current_exe()
         .ok()

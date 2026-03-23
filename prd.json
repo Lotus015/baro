@@ -1,64 +1,78 @@
 {
-  "branchName": "cleanup-dead-code-tui",
-  "description": "Remove #![allow(dead_code)] directives and fix all resulting compiler warnings in baro-tui",
-  "project": "baro-tui-dead-code-cleanup",
+  "branchName": "refactor/baro-tui-code-quality",
+  "description": "Refactor baro-tui crate: remove dead code, split large files, DRY up duplicates",
+  "project": "baro-tui-refactor",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T19:12:04.104146+00:00",
+      "completedAt": "2026-03-23T19:18:40.586334+00:00",
       "dependsOn": [],
-      "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/theme.rs. Run `cargo build 2>&1` to identify unused constants (likely SURFACE, TAB_ACTIVE, TAB_INACTIVE, RETRY, GAUGE_BG). Delete only the constants the compiler flags as unused. Run `cargo build` again to verify zero warnings from theme.rs.",
-      "durationSecs": 67,
+      "description": "Remove the parallelism_history field from App struct in app.rs (lines 129, 166) and its tracking code in main.rs (lines 258-263). The sparkline UI was removed but the tracking remained. Also check for and remove any unused imports. Run cargo build after each deletion to confirm no breakage.",
+      "durationSecs": 101,
       "id": "S1",
       "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Remove dead_code allow from theme.rs and delete unused constants"
+      "title": "Remove dead code from app.rs and main.rs"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T19:12:34.301063+00:00",
+      "completedAt": "2026-03-23T19:19:09.025082+00:00",
       "dependsOn": [],
-      "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/events.rs. Run `cargo build 2>&1` to identify unused items. The `DagNode::title` field is constructed in executor.rs but never read (only `id` is extracted in app.rs). Either remove the field and update executor.rs to stop setting it, or keep it if serde deserialization requires it. Also check `StoryInfo` fields. Fix all warnings the compiler reports. Run `cargo build` again to verify zero warnings from events.rs.",
-      "durationSecs": 97,
+      "description": "Create crates/baro-tui/src/dag.rs containing the DagLevel struct and build_dag() function (executor.rs lines 54-131). Make DagLevel and build_dag pub(crate). Update executor.rs to import from dag.rs via 'use crate::dag::{DagLevel, build_dag}'. Add 'mod dag;' to main.rs. Ensure cargo build passes with zero warnings.",
+      "durationSecs": 130,
       "id": "S2",
       "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
-      "title": "Remove dead_code allow from events.rs and fix unused fields"
+      "title": "Extract dag.rs from executor.rs"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T19:13:29.803776+00:00",
-      "dependsOn": [
-        "S1",
-        "S2"
-      ],
-      "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/app.rs. Run `cargo build 2>&1` to identify unused items. Known suspects: `App::tick()` method (unused — main.rs increments tick_count directly), `current_level` field (set internally via update_current_level() but never read by any screen renderer), possibly `update_current_level()` if current_level is removed. For each warning: if truly unused, delete it; if it should be used, wire it up. Run `cargo build` again to verify zero warnings from app.rs.",
-      "durationSecs": 54,
+      "completedAt": "2026-03-23T19:20:19.824417+00:00",
+      "dependsOn": [],
+      "description": "Create crates/baro-tui/src/git.rs containing: (1) A new get_current_branch(cwd: &Path) async helper that runs 'git branch --show-current' and returns Result<String, String>. (2) Move get_git_file_stats() (executor.rs lines 251-273). (3) Move update_prd_story() (executor.rs lines 277-298). (4) Move git_push_with_retry() (executor.rs lines 302-394). Refactor git_push_with_retry and execute_story to use the new get_current_branch helper instead of inline 'git branch --show-current' calls (currently at executor.rs lines 311-318 and 427-436). Make all moved functions pub(crate). Add 'mod git;' to main.rs. Update executor.rs imports.",
+      "durationSecs": 201,
       "id": "S3",
       "passes": true,
       "priority": 3,
       "retries": 2,
       "tests": [],
-      "title": "Remove dead_code allow from app.rs and fix unused items"
+      "title": "Extract git.rs from executor.rs with get_current_branch helper"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T19:14:31.666869+00:00",
+      "completedAt": "2026-03-23T19:23:21.317187+00:00",
       "dependsOn": [
+        "S2",
         "S3"
       ],
-      "description": "Run `cargo build 2>&1` on the entire workspace and verify there are absolutely zero dead_code warnings remaining in crates/baro-tui/src/. Also verify no `#![allow(dead_code)]` directives remain in theme.rs, app.rs, or events.rs. If any warnings remain, fix them. Ensure the application still compiles successfully.",
-      "durationSecs": 60,
+      "description": "Split the 949-line screens/execute.rs into focused sub-modules: (1) Create screens/execute_dashboard.rs with render_dashboard(), render_story_list(), story_list_item(), render_logs() (lines 237-449). (2) Create screens/execute_dag.rs with render_dag_full() (lines 454-601). (3) Create screens/execute_stats.rs with render_stats_full() (lines 605-878). (4) Create screens/execute_completion.rs with render_completion() (lines 44-163). (5) Move status_icon_color() to a shared location - keep it in screens/execute.rs and make it pub(crate) so execute_dag.rs can import it. Keep in screens/execute.rs: render(), render_header(), render_progress(), render_footer(), status_icon_color(). Update screens/mod.rs to declare the new sub-modules. Each sub-module imports status_icon_color from execute.rs as needed.",
+      "durationSecs": 180,
       "id": "S4",
       "passes": true,
       "priority": 4,
       "retries": 2,
       "tests": [],
-      "title": "Verify full build has zero dead_code warnings"
+      "title": "Split screens/execute.rs into sub-modules"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S1",
+        "S4"
+      ],
+      "description": "Run cargo build and cargo clippy on the entire workspace. Verify zero warnings and zero errors. Fix any remaining unused imports or minor issues. Ensure the binary compiles correctly and all module declarations are consistent.",
+      "durationSecs": null,
+      "id": "S5",
+      "passes": false,
+      "priority": 5,
+      "retries": 2,
+      "tests": [],
+      "title": "Final verification - zero warnings, zero errors"
     }
   ]
 }

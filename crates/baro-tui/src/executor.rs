@@ -607,6 +607,6 @@ pub fn prd_from_review(
 pub fn write_prd(prd: &PrdFile, cwd: &Path) -> std::io::Result<()> {
     let prd_path = cwd.join("prd.json");
     let content = serde_json::to_string_pretty(prd)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
     std::fs::write(prd_path, format!("{}\n", content))
 }
