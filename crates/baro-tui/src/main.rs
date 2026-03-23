@@ -13,7 +13,10 @@ use std::time::Duration;
 use clap::Parser;
 use crossterm::{
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::process::Command;
@@ -114,6 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tty = open_tty()?;
     enable_raw_mode()?;
     execute!(tty, EnterAlternateScreen)?;
+    execute!(tty, Clear(ClearType::All))?;
     let backend = CrosstermBackend::new(tty);
     let mut terminal = Terminal::new(backend)?;
 
