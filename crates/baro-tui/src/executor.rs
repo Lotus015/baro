@@ -669,7 +669,6 @@ pub async fn run_executor(
                     stories.iter().find(|s| s.id == *id).map(|s| {
                         crate::events::DagNode {
                             id: s.id.clone(),
-                            title: s.title.clone(),
                         }
                     })
                 })

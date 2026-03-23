@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -13,7 +11,6 @@ pub struct StoryInfo {
 #[derive(Debug, Deserialize, Clone)]
 pub struct DagNode {
     pub id: String,
-    pub title: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

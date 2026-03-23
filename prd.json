@@ -1,66 +1,64 @@
 {
-  "branchName": "feat/git-coordination",
-  "description": "Add git mutex, pull-before-execute, push-with-retry, rebase conflict handling, and TUI git log lines to executor.rs",
-  "project": "baro-git-coordination",
+  "project": "baro-tui-dead-code-cleanup",
+  "branchName": "cleanup-dead-code-tui",
+  "description": "Remove #![allow(dead_code)] directives and fix all resulting compiler warnings in baro-tui",
   "userStories": [
     {
-      "acceptance": [],
-      "completedAt": "2026-03-23T18:52:31.090064+00:00",
-      "dependsOn": [],
-      "description": "In executor.rs, create a shared tokio::sync::Mutex (e.g. `Arc<tokio::sync::Mutex<()>>`) called `git_mutex` in `run_executor`. Pass it into `execute_story` and wrap all git operations (commit, pull, push) in a lock guard so only one story at a time can perform git operations. This prevents conflicts when parallel stories finish simultaneously. The mutex should be created once in run_executor and passed via Arc clone to each spawned story task.",
-      "durationSecs": 114,
       "id": "S1",
-      "passes": true,
       "priority": 1,
+      "title": "Remove dead_code allow from theme.rs and delete unused constants",
+      "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/theme.rs. Run `cargo build 2>&1` to identify unused constants (likely SURFACE, TAB_ACTIVE, TAB_INACTIVE, RETRY, GAUGE_BG). Delete only the constants the compiler flags as unused. Run `cargo build` again to verify zero warnings from theme.rs.",
+      "dependsOn": [],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Add git mutex for serialized git operations"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
-      "acceptance": [],
-      "completedAt": "2026-03-23T18:53:24.244180+00:00",
-      "dependsOn": [
-        "S1"
-      ],
-      "description": "In executor.rs, before each story starts running claude (inside execute_story, before `run_claude_for_story`), acquire the git_mutex and run `git pull --rebase origin <branch>` where <branch> is the current branch (get it via `git branch --show-current`). Log '[git] pulling latest...' via StoryLog event. If the pull succeeds, log '[git] pull ok' and release the mutex. If the pull fails due to rebase conflicts, run `git rebase --abort`, log '[git] conflict detected on pull, skipping', send a StoryError event, and return Err to skip the story. The pull should happen inside the git_mutex lock.",
-      "durationSecs": 51,
       "id": "S2",
-      "passes": true,
       "priority": 2,
+      "title": "Remove dead_code allow from events.rs and fix unused fields",
+      "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/events.rs. Run `cargo build 2>&1` to identify unused items. The `DagNode::title` field is constructed in executor.rs but never read (only `id` is extracted in app.rs). Either remove the field and update executor.rs to stop setting it, or keep it if serde deserialization requires it. Also check `StoryInfo` fields. Fix all warnings the compiler reports. Run `cargo build` again to verify zero warnings from events.rs.",
+      "dependsOn": [],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Add git pull --rebase before story execution"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
-      "acceptance": [],
-      "completedAt": "2026-03-23T18:54:36.895740+00:00",
-      "dependsOn": [
-        "S1"
-      ],
-      "description": "In executor.rs, replace the existing `auto_push` function with a new `git_push_with_retry` function that: 1) Acquires the git_mutex. 2) Logs '[git] pushing...' via StoryLog. 3) Attempts `git push origin <branch>`. 4) If push fails (likely due to remote changes), logs '[git] push failed, pulling and retrying...', runs `git pull --rebase origin <branch>`. If rebase conflicts, runs `git rebase --abort`, logs '[git] conflict detected, skipping', and returns Err. 5) Retries push up to 3 times total. 6) On success, logs '[git] push ok'. 7) On final failure after 3 attempts, logs '[git] push failed after 3 attempts'. Update execute_story to call this new function instead of auto_push. The function should accept the git_mutex, cwd, story_id, and tx sender.",
-      "durationSecs": 123,
       "id": "S3",
-      "passes": true,
       "priority": 3,
+      "title": "Remove dead_code allow from app.rs and fix unused items",
+      "description": "Remove `#![allow(dead_code)]` from crates/baro-tui/src/app.rs. Run `cargo build 2>&1` to identify unused items. Known suspects: `App::tick()` method (unused — main.rs increments tick_count directly), `current_level` field (set internally via update_current_level() but never read by any screen renderer), possibly `update_current_level()` if current_level is removed. For each warning: if truly unused, delete it; if it should be used, wire it up. Run `cargo build` again to verify zero warnings from app.rs.",
+      "dependsOn": [
+        "S1",
+        "S2"
+      ],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Replace auto_push with push-with-retry logic"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
-      "acceptance": [],
-      "completedAt": "2026-03-23T18:55:18.963390+00:00",
+      "id": "S4",
+      "priority": 4,
+      "title": "Verify full build has zero dead_code warnings",
+      "description": "Run `cargo build 2>&1` on the entire workspace and verify there are absolutely zero dead_code warnings remaining in crates/baro-tui/src/. Also verify no `#![allow(dead_code)]` directives remain in theme.rs, app.rs, or events.rs. If any warnings remain, fix them. Ensure the application still compiles successfully.",
       "dependsOn": [
-        "S2",
         "S3"
       ],
-      "description": "Run a full `cargo build` to ensure everything compiles cleanly with no warnings related to the new git coordination code. Review all '[git] ...' log lines in executor.rs to ensure consistent formatting: '[git] pulling latest...', '[git] pull ok', '[git] pushing...', '[git] push ok', '[git] push failed, pulling and retrying...', '[git] conflict detected, skipping'. Fix any compilation errors or inconsistencies found.",
-      "durationSecs": 40,
-      "id": "S4",
-      "passes": true,
-      "priority": 4,
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Verify full build and test git log output format"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     }
   ]
 }
