@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
 use crate::app::ReviewStory;
 use crate::events::BaroEvent;
@@ -347,6 +348,7 @@ async fn execute_story(
     cwd: &Path,
     prd_path: &Path,
     tx: &mpsc::Sender<BaroEvent>,
+    git_mutex: &Mutex<()>,
 ) -> Result<(u64, u32, u32), String> {
     let max_attempts = story.retries + 1;
 
@@ -367,6 +369,9 @@ async fn execute_story(
 
         match result {
             Ok(()) => {
+                // Acquire git mutex for serialized git operations
+                let _git_lock = git_mutex.lock().await;
+
                 // Update prd.json
                 let _ = update_prd_story(prd_path, &story.id, duration_secs);
 
@@ -386,6 +391,8 @@ async fn execute_story(
                         error: push_error,
                     })
                     .await;
+
+                drop(_git_lock);
 
                 return Ok((duration_secs, files_created, files_modified));
             }
@@ -554,6 +561,8 @@ pub async fn run_executor(
 
     let _ = tx.send(BaroEvent::Dag { levels: dag_levels }).await;
 
+    let git_mutex = Arc::new(Mutex::new(()));
+
     let start = Instant::now();
     let mut completed = 0u32;
     let mut skipped = 0u32;
@@ -577,9 +586,10 @@ pub async fn run_executor(
             let cwd = cwd.clone();
             let prd_path = prd_path.clone();
             let tx = tx.clone();
+            let git_mutex = Arc::clone(&git_mutex);
 
             let handle = tokio::spawn(async move {
-                execute_story(&story, &cwd, &prd_path, &tx).await
+                execute_story(&story, &cwd, &prd_path, &tx, &git_mutex).await
             });
             handles.push((story_id.clone(), handle));
         }
@@ -632,6 +642,8 @@ pub async fn run_executor(
 
     // Final push of prd.json completion status
     let _prd_push = async {
+        let _git_lock = git_mutex.lock().await;
+
         let add = Command::new("git")
             .args(["add", "prd.json"])
             .current_dir(&cwd)
