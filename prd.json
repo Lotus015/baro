@@ -49,14 +49,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-23T17:53:15.897314+00:00",
       "dependsOn": [
         "S3"
       ],
       "description": "In the Rust executor (crates/baro-tui/src/executor.rs), after the main execution loop completes (before emitting the Done event, around line 575), do a final 'git add prd.json && git commit -m \"chore: update prd.json completion status\" && git push origin <branch>' to ensure the final prd.json state is pushed. In the Node.js executor (packages/baro-app/src/core/executor.ts), do the same before the final done emit. In the TUI completion screen (crates/baro-tui/src/screens/execute.rs render_completion()), add a line showing push status: 'Pushed: N/M stories' showing how many were successfully pushed out of total completed, using the push_results from app state.",
-      "durationSecs": null,
+      "durationSecs": 131,
       "id": "S4",
-      "passes": false,
+      "passes": true,
       "priority": 4,
       "retries": 2,
       "tests": [],
