@@ -296,6 +296,50 @@ fn update_prd_story(prd_path: &Path, story_id: &str, duration_secs: u64) -> std:
     Ok(())
 }
 
+// ─── Auto-push after commit ─────────────────────────────────
+
+async fn auto_push(cwd: &Path) -> Result<(), String> {
+    // Check remote exists
+    let remote = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to check remote: {}", e))?;
+
+    if !remote.status.success() {
+        return Err("No remote 'origin' configured".to_string());
+    }
+
+    // Get current branch
+    let branch = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to get branch: {}", e))?;
+
+    let branch_name = String::from_utf8_lossy(&branch.stdout).trim().to_string();
+    if branch_name.is_empty() {
+        return Err("Could not determine current branch".to_string());
+    }
+
+    // Push
+    let push = Command::new("git")
+        .args(["push", "origin", &branch_name])
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to push: {}", e))?;
+
+    if push.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&push.stderr).trim().to_string();
+        Err(format!("Push failed: {}", stderr))
+    }
+}
+
 // ─── Execute a single story ─────────────────────────────────
 
 async fn execute_story(
@@ -328,6 +372,20 @@ async fn execute_story(
 
                 // Get git stats
                 let (files_created, files_modified) = get_git_file_stats(cwd).await;
+
+                // Auto-push
+                let push_result = auto_push(cwd).await;
+                let (push_success, push_error) = match &push_result {
+                    Ok(()) => (true, None),
+                    Err(e) => (false, Some(e.clone())),
+                };
+                let _ = tx
+                    .send(BaroEvent::PushStatus {
+                        id: story.id.clone(),
+                        success: push_success,
+                        error: push_error,
+                    })
+                    .await;
 
                 return Ok((duration_secs, files_created, files_modified));
             }

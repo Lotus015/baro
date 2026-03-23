@@ -8,6 +8,7 @@ import * as path from "path"
 import * as fs from "fs"
 import { CliTask } from "./cli-task.js"
 import { buildDag } from "./dag.js"
+import { autoPush } from "./git.js"
 
 interface PrdV2 {
     project: string
@@ -101,6 +102,10 @@ async function main() {
                     fs.writeFileSync(prdPath, JSON.stringify(raw, null, 2) + "\n")
 
                     emit({ type: "story_complete", id: story.id, duration_secs: dur, files_created: 0, files_modified: 0 })
+
+                    const pushResult = autoPush(cwd)
+                    emit({ type: "push_status", id: story.id, success: pushResult.success, error: pushResult.error })
+
                     emit({ type: "progress", completed, total, percentage: Math.round((completed / total) * 100) })
                     return
                 } catch (err: any) {
