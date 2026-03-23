@@ -1,49 +1,49 @@
 {
-  "project": "legacy-ts-cleanup",
   "branchName": "chore/remove-legacy-ts-files",
   "description": "Delete legacy TypeScript files replaced by Rust rewrite",
+  "project": "legacy-ts-cleanup",
   "userStories": [
     {
-      "id": "S1",
-      "priority": 1,
-      "title": "Delete legacy core TypeScript files",
+      "acceptance": [],
+      "completedAt": "2026-03-23T18:32:53.414326+00:00",
+      "dependsOn": [],
       "description": "Delete the following legacy core files that have been replaced by Rust: packages/baro-app/src/core/claude-planner.ts, packages/baro-app/src/core/cli-task.ts, packages/baro-app/src/core/dag.ts, packages/baro-app/src/core/events.ts, packages/baro-app/src/core/executor.ts, packages/baro-app/src/core/git.ts. DO NOT delete: planner.ts, stream.ts, tools.ts, openai-planner.ts, prd.ts — these are still used.",
-      "dependsOn": [],
+      "durationSecs": 27,
+      "id": "S1",
+      "passes": true,
+      "priority": 1,
       "retries": 2,
-      "acceptance": [],
       "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "title": "Delete legacy core TypeScript files"
     },
     {
-      "id": "S2",
-      "priority": 2,
-      "title": "Delete legacy screens directory and Ink entry points",
+      "acceptance": [],
+      "completedAt": "2026-03-23T18:32:57.226284+00:00",
+      "dependsOn": [],
       "description": "Delete the entire packages/baro-app/src/screens/ directory (ApiKeyScreen.tsx, ExecuteScreen.tsx, PlanScreen.tsx, ReviewScreen.tsx) and the old Ink entry points: packages/baro-app/src/App.tsx and packages/baro-app/src/cli.tsx. These have been replaced by Rust ratatui screens.",
-      "dependsOn": [],
+      "durationSecs": 31,
+      "id": "S2",
+      "passes": true,
+      "priority": 2,
       "retries": 2,
-      "acceptance": [],
       "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "title": "Delete legacy screens directory and Ink entry points"
     },
     {
-      "id": "S3",
-      "priority": 3,
-      "title": "Verify tsup build still works for openai-planner",
-      "description": "After S1 and S2 deletions, verify the tsup build script in package.json ('tsup src/core/openai-planner.ts --format esm') still compiles successfully. The build entry point is openai-planner.ts which imports only from planner.ts, stream.ts, tools.ts, and prd.ts — all of which are kept. If the build fails, fix any issues. Also verify there are no stale references to deleted files in tsconfig.json or package.json that need cleanup.",
+      "acceptance": [],
+      "completedAt": null,
       "dependsOn": [
         "S1",
         "S2"
       ],
-      "retries": 2,
-      "acceptance": [],
-      "tests": [],
+      "description": "After S1 and S2 deletions, verify the tsup build script in package.json ('tsup src/core/openai-planner.ts --format esm') still compiles successfully. The build entry point is openai-planner.ts which imports only from planner.ts, stream.ts, tools.ts, and prd.ts — all of which are kept. If the build fails, fix any issues. Also verify there are no stale references to deleted files in tsconfig.json or package.json that need cleanup.",
+      "durationSecs": null,
+      "id": "S3",
       "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "priority": 3,
+      "retries": 2,
+      "tests": [],
+      "title": "Verify tsup build still works for openai-planner"
     }
   ]
 }
