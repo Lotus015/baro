@@ -1,48 +1,49 @@
 {
-  "branchName": "fix/tui-scrollback-and-review-scroll",
-  "description": "Fix terminal scrollback bleed and broken review screen scrolling",
-  "project": "baro-tui-bugs",
+  "project": "legacy-ts-cleanup",
+  "branchName": "chore/remove-legacy-ts-files",
+  "description": "Delete legacy TypeScript files replaced by Rust rewrite",
   "userStories": [
     {
-      "acceptance": [],
-      "completedAt": "2026-03-23T18:24:35.770610+00:00",
-      "dependsOn": [],
-      "description": "In crates/baro-tui/src/main.rs, after the execute!(tty, EnterAlternateScreen) call on line 116, add a full terminal clear using crossterm::execute!(tty, crossterm::terminal::Clear(crossterm::terminal::ClearType::All)) before creating the CrosstermBackend. This ensures the alternate screen buffer starts clean and scrolling up in the host terminal does not show previous output behind the TUI. Import crossterm::terminal::{Clear, ClearType} at the top of the file (add to the existing crossterm use block).",
-      "durationSecs": 39,
       "id": "S1",
-      "passes": true,
       "priority": 1,
-      "retries": 2,
-      "tests": [],
-      "title": "Fix terminal scrollback bleed on alternate screen entry"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-23T18:24:54.436101+00:00",
+      "title": "Delete legacy core TypeScript files",
+      "description": "Delete the following legacy core files that have been replaced by Rust: packages/baro-app/src/core/claude-planner.ts, packages/baro-app/src/core/cli-task.ts, packages/baro-app/src/core/dag.ts, packages/baro-app/src/core/events.ts, packages/baro-app/src/core/executor.ts, packages/baro-app/src/core/git.ts. DO NOT delete: planner.ts, stream.ts, tools.ts, openai-planner.ts, prd.ts — these are still used.",
       "dependsOn": [],
-      "description": "In crates/baro-tui/src/app.rs, add a new field review_scroll_offset: u16 to the App struct (in the Review screen section near line 111). Initialize it to 0 in App::new(). Reset it to 0 in show_review(). Update review_next() and review_prev() to also adjust review_scroll_offset: in review_next(), if the selected story would be below the visible area, increment review_scroll_offset (clamped to a reasonable max). In review_prev(), if the selected story would be above the visible area, decrement review_scroll_offset. For simplicity, estimate ~4 lines per story entry. The review_scroll field (selected story index) should remain as-is for tracking which story is highlighted.",
-      "durationSecs": 58,
-      "id": "S2",
-      "passes": true,
-      "priority": 2,
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Add review_scroll_offset field to App state"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
+      "id": "S2",
+      "priority": 2,
+      "title": "Delete legacy screens directory and Ink entry points",
+      "description": "Delete the entire packages/baro-app/src/screens/ directory (ApiKeyScreen.tsx, ExecuteScreen.tsx, PlanScreen.tsx, ReviewScreen.tsx) and the old Ink entry points: packages/baro-app/src/App.tsx and packages/baro-app/src/cli.tsx. These have been replaced by Rust ratatui screens.",
+      "dependsOn": [],
+      "retries": 2,
       "acceptance": [],
-      "completedAt": "2026-03-23T18:25:58.941936+00:00",
+      "tests": [],
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
+    },
+    {
+      "id": "S3",
+      "priority": 3,
+      "title": "Verify tsup build still works for openai-planner",
+      "description": "After S1 and S2 deletions, verify the tsup build script in package.json ('tsup src/core/openai-planner.ts --format esm') still compiles successfully. The build entry point is openai-planner.ts which imports only from planner.ts, stream.ts, tools.ts, and prd.ts — all of which are kept. If the build fails, fix any issues. Also verify there are no stale references to deleted files in tsconfig.json or package.json that need cleanup.",
       "dependsOn": [
+        "S1",
         "S2"
       ],
-      "description": "In crates/baro-tui/src/screens/review.rs, replace the broken scroll_offset calculation (lines 119-123) that tries to derive offset from review_scroll. Instead, use app.review_scroll_offset directly as the scroll value passed to Paragraph::scroll((app.review_scroll_offset, 0)). Update the ScrollbarState position to also use app.review_scroll_offset so the scrollbar matches the actual scroll position. The max for ScrollbarState should be total_lines.saturating_sub(inner_height), and position should be app.review_scroll_offset as usize. Also update the key handling in main.rs for the Review screen: on Up/Down keys, after calling review_prev()/review_next(), the app should recalculate review_scroll_offset properly. The cleanest approach: make review_next/review_prev take an available_height parameter (passed from the key handler as a reasonable default like 20, or store terminal height in App). Alternatively, keep the offset management simple in review_next/review_prev using the ~4 lines per story estimate.",
-      "durationSecs": 63,
-      "id": "S3",
-      "passes": true,
-      "priority": 3,
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Wire review_scroll_offset into review screen rendering"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     }
   ]
 }
