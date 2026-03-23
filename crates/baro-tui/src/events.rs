@@ -84,6 +84,26 @@ pub enum BaroEvent {
         error: Option<String>,
     },
 
+    #[serde(rename = "review_start")]
+    #[allow(dead_code)]
+    ReviewStart {
+        level: usize,
+    },
+
+    #[serde(rename = "review_log")]
+    #[allow(dead_code)]
+    ReviewLog {
+        line: String,
+    },
+
+    #[serde(rename = "review_complete")]
+    #[allow(dead_code)]
+    ReviewComplete {
+        level: usize,
+        passed: bool,
+        fix_count: u32,
+    },
+
     #[serde(rename = "done")]
     Done {
         total_time_secs: u64,

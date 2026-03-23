@@ -376,6 +376,12 @@ impl App {
                 self.push_results.push((id, success, error));
             }
 
+            BaroEvent::ReviewStart { .. }
+            | BaroEvent::ReviewLog { .. }
+            | BaroEvent::ReviewComplete { .. } => {
+                // Review events: handled in a future story
+            }
+
             BaroEvent::Done {
                 total_time_secs,
                 stats,
