@@ -29,6 +29,7 @@ export type BaroEvent =
     | { type: "story_error"; id: string; error: string; attempt: number; max_retries: number }
     | { type: "story_retry"; id: string; attempt: number }
     | { type: "progress"; completed: number; total: number; percentage: number }
+    | { type: "push_status"; id: string; success: boolean; error?: string }
     | { type: "done"; total_time_secs: number; stats: DoneStats }
 
 export class BaroEventEmitter {

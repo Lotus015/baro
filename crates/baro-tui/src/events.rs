@@ -80,6 +80,13 @@ pub enum BaroEvent {
         percentage: u32,
     },
 
+    #[serde(rename = "push_status")]
+    PushStatus {
+        id: String,
+        success: bool,
+        error: Option<String>,
+    },
+
     #[serde(rename = "done")]
     Done {
         total_time_secs: u64,
