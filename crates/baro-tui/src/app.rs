@@ -125,6 +125,11 @@ pub struct App {
     // Push tracking
     pub push_results: Vec<(String, bool, Option<String>)>,
 
+    // Review tracking
+    pub review_in_progress: bool,
+    pub review_level: usize,
+    pub review_logs: Vec<String>,
+
     // UI state
     pub global_tab: GlobalTab,
     pub selected_log_index: usize,
@@ -160,6 +165,9 @@ impl App {
             final_stats: None,
             total_time_secs: 0,
             push_results: Vec::new(),
+            review_in_progress: false,
+            review_level: 0,
+            review_logs: Vec::new(),
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
             tick_count: 0,
@@ -376,10 +384,18 @@ impl App {
                 self.push_results.push((id, success, error));
             }
 
-            BaroEvent::ReviewStart { .. }
-            | BaroEvent::ReviewLog { .. }
-            | BaroEvent::ReviewComplete { .. } => {
-                // Review events: handled in a future story
+            BaroEvent::ReviewStart { level } => {
+                self.review_in_progress = true;
+                self.review_level = level;
+                self.review_logs.clear();
+            }
+
+            BaroEvent::ReviewLog { line } => {
+                self.review_logs.push(line);
+            }
+
+            BaroEvent::ReviewComplete { .. } => {
+                self.review_in_progress = false;
             }
 
             BaroEvent::Done {

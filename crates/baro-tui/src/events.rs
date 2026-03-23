@@ -85,13 +85,11 @@ pub enum BaroEvent {
     },
 
     #[serde(rename = "review_start")]
-    #[allow(dead_code)]
     ReviewStart {
         level: usize,
     },
 
     #[serde(rename = "review_log")]
-    #[allow(dead_code)]
     ReviewLog {
         line: String,
     },
