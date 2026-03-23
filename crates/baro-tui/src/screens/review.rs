@@ -25,7 +25,13 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // Header
     let story_count = app.review_stories.len();
-    let header = Paragraph::new(Line::from(vec![
+    let header_title = if app.is_resume {
+        "Resume Review"
+    } else {
+        "Plan Review"
+    };
+
+    let mut header_spans = vec![
         Span::styled(
             " BARO ",
             Style::default()
@@ -34,7 +40,7 @@ pub fn render(f: &mut Frame, app: &App) {
         ),
         Span::styled(" | ", Style::default().fg(theme::BORDER)),
         Span::styled(
-            "Plan Review",
+            header_title,
             Style::default()
                 .fg(theme::TEXT)
                 .add_modifier(Modifier::BOLD),
@@ -44,17 +50,31 @@ pub fn render(f: &mut Frame, app: &App) {
             format!("{} stories", story_count),
             Style::default().fg(theme::ACCENT),
         ),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER)),
-    );
+    ];
+
+    if app.is_resume {
+        let done_count = app.review_stories.iter().filter(|s| s.completed).count();
+        let remaining = story_count - done_count;
+        header_spans.push(Span::styled(" | ", Style::default().fg(theme::BORDER)));
+        header_spans.push(Span::styled(
+            format!("{} done, {} remaining", done_count, remaining),
+            Style::default().fg(theme::SUCCESS),
+        ));
+    }
+
+    let header = Paragraph::new(Line::from(header_spans))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme::BORDER)),
+        );
     f.render_widget(header, chunks[0]);
 
     // Plan content
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
+
+    let block_title = if app.is_resume { " Resume " } else { " Plan " };
 
     if app.review_stories.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -65,8 +85,27 @@ pub fn render(f: &mut Frame, app: &App) {
         for (i, story) in app.review_stories.iter().enumerate() {
             let is_selected = i == app.review_scroll;
 
-            let marker = if is_selected { "\u{25b6}" } else { " " };
-            let marker_style = if is_selected {
+            let marker = if app.is_resume {
+                if story.completed {
+                    "\u{2713}" // ✓
+                } else {
+                    "\u{25cb}" // ○
+                }
+            } else if is_selected {
+                "\u{25b6}" // ▶
+            } else {
+                " "
+            };
+
+            let marker_style = if app.is_resume {
+                if story.completed {
+                    Style::default()
+                        .fg(theme::SUCCESS)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme::MUTED)
+                }
+            } else if is_selected {
                 Style::default()
                     .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD)
@@ -74,7 +113,9 @@ pub fn render(f: &mut Frame, app: &App) {
                 Style::default().fg(theme::MUTED)
             };
 
-            let title_style = if is_selected {
+            let title_style = if app.is_resume && story.completed {
+                Style::default().fg(theme::SUCCESS)
+            } else if is_selected {
                 Style::default()
                     .fg(theme::TEXT)
                     .add_modifier(Modifier::BOLD)
@@ -123,7 +164,7 @@ pub fn render(f: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme::BORDER))
                 .title(Span::styled(
-                    " Plan ",
+                    block_title,
                     Style::default()
                         .fg(theme::ACCENT)
                         .add_modifier(Modifier::BOLD),
@@ -145,6 +186,7 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     // Footer
+    let accept_label = if app.is_resume { ":resume  " } else { ":accept  " };
     let footer = Paragraph::new(Line::from(vec![
         Span::styled(
             "Enter",
@@ -152,7 +194,7 @@ pub fn render(f: &mut Frame, app: &App) {
                 .fg(theme::ACCENT)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(":accept  ", Style::default().fg(theme::MUTED)),
+        Span::styled(accept_label, Style::default().fg(theme::MUTED)),
         Span::styled(
             "\u{2191}/\u{2193}",
             Style::default()

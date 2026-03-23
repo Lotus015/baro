@@ -88,6 +88,7 @@ pub struct ReviewStory {
     pub title: String,
     pub description: String,
     pub depends_on: Vec<String>,
+    pub completed: bool,
 }
 
 pub struct App {
@@ -130,10 +131,9 @@ pub struct App {
     pub review_level: usize,
     pub review_logs: Vec<String>,
 
-    // Resume mode (used by later stories)
+    // Resume mode
     #[allow(dead_code)]
     pub resume_mode: bool,
-    #[allow(dead_code)]
     pub is_resume: bool,
 
     // UI state
