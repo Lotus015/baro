@@ -40,6 +40,10 @@ struct Cli {
     /// Working directory
     #[arg(long, default_value = ".")]
     cwd: String,
+
+    /// Resume execution from existing prd.json
+    #[arg(long)]
+    resume: bool,
 }
 
 enum AppEvent {

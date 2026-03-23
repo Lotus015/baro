@@ -130,6 +130,12 @@ pub struct App {
     pub review_level: usize,
     pub review_logs: Vec<String>,
 
+    // Resume mode (used by later stories)
+    #[allow(dead_code)]
+    pub resume_mode: bool,
+    #[allow(dead_code)]
+    pub is_resume: bool,
+
     // UI state
     pub global_tab: GlobalTab,
     pub selected_log_index: usize,
@@ -168,6 +174,8 @@ impl App {
             review_in_progress: false,
             review_level: 0,
             review_logs: Vec::new(),
+            resume_mode: false,
+            is_resume: false,
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
             tick_count: 0,
