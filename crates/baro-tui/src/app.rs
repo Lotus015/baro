@@ -109,6 +109,7 @@ pub struct App {
     pub description: String,
     pub review_stories: Vec<ReviewStory>,
     pub review_scroll: usize,
+    pub review_scroll_offset: u16,
 
     // Execute screen
     pub project: String,
@@ -151,6 +152,7 @@ impl App {
             description: String::new(),
             review_stories: Vec::new(),
             review_scroll: 0,
+            review_scroll_offset: 0,
 
             project: String::new(),
             stories: Vec::new(),
@@ -185,6 +187,7 @@ impl App {
     pub fn show_review(&mut self, stories: Vec<ReviewStory>) {
         self.review_stories = stories;
         self.review_scroll = 0;
+        self.review_scroll_offset = 0;
         self.screen = Screen::Review;
     }
 
@@ -244,11 +247,25 @@ impl App {
     pub fn review_next(&mut self) {
         if !self.review_stories.is_empty() {
             self.review_scroll = (self.review_scroll + 1).min(self.review_stories.len() - 1);
+            // ~4 lines per story entry; scroll down if selected story is below visible area
+            let lines_per_story: u16 = 4;
+            let visible_end = self.review_scroll_offset.saturating_add(20); // estimate ~20 visible lines
+            let selected_bottom = (self.review_scroll as u16 + 1) * lines_per_story;
+            if selected_bottom > visible_end {
+                let max_offset = (self.review_stories.len() as u16).saturating_mul(lines_per_story).saturating_sub(20);
+                self.review_scroll_offset = (self.review_scroll_offset + lines_per_story).min(max_offset);
+            }
         }
     }
 
     pub fn review_prev(&mut self) {
         self.review_scroll = self.review_scroll.saturating_sub(1);
+        // ~4 lines per story entry; scroll up if selected story is above visible area
+        let lines_per_story: u16 = 4;
+        let selected_top = self.review_scroll as u16 * lines_per_story;
+        if selected_top < self.review_scroll_offset {
+            self.review_scroll_offset = self.review_scroll_offset.saturating_sub(lines_per_story);
+        }
     }
 
     pub fn handle_event(&mut self, event: BaroEvent) {
