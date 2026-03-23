@@ -18,14 +18,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-23T17:49:45.790325+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "In crates/baro-tui/src/executor.rs, add an async function auto_push(cwd: &Path) -> Result<(), String> that: 1) checks a remote exists via 'git remote get-url origin', 2) gets the current branch via 'git branch --show-current', 3) runs 'git push origin <branch>'. Call this function in execute_story() right after the successful update_prd_story() and get_git_file_stats() calls (around line 330). After pushing, send a BaroEvent::PushStatus event via the tx channel with the story id and success/error. Also add auto-push in the Node.js executor (packages/baro-app/src/core/executor.ts): after the story_complete emit (around line 103), call the existing autoPush function from git.ts and emit a push_status event.",
-      "durationSecs": null,
+      "durationSecs": 82,
       "id": "S2",
-      "passes": false,
+      "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
@@ -33,15 +33,15 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-23T17:51:04.687802+00:00",
       "dependsOn": [
         "S1",
         "S2"
       ],
       "description": "In crates/baro-tui/src/app.rs: 1) Add a push_results field to App struct: pub push_results: Vec<(String, bool, Option<String>)> storing (story_id, success, error). Initialize it as empty Vec in App::new(). 2) In handle_event(), add a match arm for BaroEvent::PushStatus that pushes the result to push_results and logs success/failure to the story's active logs if still active. In crates/baro-tui/src/screens/execute.rs: in the story list item rendering, if a story is Complete AND has a successful push in push_results, append a small '↑' upload indicator after the checkmark. If push failed, show '↑!' in red. This gives visual feedback that code was pushed.",
-      "durationSecs": null,
+      "durationSecs": 78,
       "id": "S3",
-      "passes": false,
+      "passes": true,
       "priority": 3,
       "retries": 2,
       "tests": [],

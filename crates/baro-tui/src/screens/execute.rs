@@ -44,7 +44,7 @@ pub fn render(f: &mut Frame, app: &App) {
 fn render_completion(f: &mut Frame, app: &App) {
     let area = f.area();
     let box_width = 50u16.min(area.width.saturating_sub(4));
-    let box_height = 14u16.min(area.height.saturating_sub(2));
+    let box_height = 15u16.min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(box_width)) / 2;
     let y = (area.height.saturating_sub(box_height)) / 2;
     let popup_area = Rect::new(x, y, box_width, box_height);
@@ -121,6 +121,24 @@ fn render_completion(f: &mut Frame, app: &App) {
             Span::styled(
                 format!("{}", files_modified),
                 Style::default().fg(theme::ACCENT),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Pushed:         ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                {
+                    let pushed_ok = app.push_results.iter().filter(|(_, ok, _)| *ok).count();
+                    let push_total = app.push_results.len();
+                    format!("{}/{} stories", pushed_ok, push_total)
+                },
+                Style::default().fg(
+                    if app.push_results.iter().all(|(_, ok, _)| *ok) && !app.push_results.is_empty()
+                    {
+                        theme::SUCCESS
+                    } else {
+                        theme::WARNING
+                    },
+                ),
             ),
         ]),
         Line::from(""),

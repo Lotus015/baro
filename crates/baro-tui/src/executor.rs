@@ -630,6 +630,38 @@ pub async fn run_executor(
         }
     }
 
+    // Final push of prd.json completion status
+    let _prd_push = async {
+        let add = Command::new("git")
+            .args(["add", "prd.json"])
+            .current_dir(&cwd)
+            .output()
+            .await
+            .map_err(|e| format!("git add failed: {}", e))?;
+        if !add.status.success() {
+            return Err(format!(
+                "git add prd.json failed: {}",
+                String::from_utf8_lossy(&add.stderr)
+            ));
+        }
+
+        let commit = Command::new("git")
+            .args(["commit", "-m", "chore: update prd.json completion status"])
+            .current_dir(&cwd)
+            .output()
+            .await
+            .map_err(|e| format!("git commit failed: {}", e))?;
+        if !commit.status.success() {
+            let stderr = String::from_utf8_lossy(&commit.stderr);
+            if !stderr.contains("nothing to commit") {
+                return Err(format!("git commit failed: {}", stderr));
+            }
+        }
+
+        auto_push(&cwd).await
+    }
+    .await;
+
     let total_time_secs = start.elapsed().as_secs();
     let _ = tx
         .send(BaroEvent::Done {

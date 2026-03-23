@@ -6,6 +6,7 @@
 
 import * as path from "path"
 import * as fs from "fs"
+import { execSync } from "child_process"
 import { CliTask } from "./cli-task.js"
 import { buildDag } from "./dag.js"
 import { autoPush } from "./git.js"
@@ -119,6 +120,19 @@ async function main() {
                 }
             }
         }))
+    }
+
+    // Final push of prd.json completion status
+    try {
+        execSync("git add prd.json", { cwd })
+        try {
+            execSync('git commit -m "chore: update prd.json completion status"', { cwd })
+        } catch {
+            // ignore if nothing to commit
+        }
+        autoPush(cwd)
+    } catch {
+        // best-effort
     }
 
     emit({ type: "done", total_time_secs: Math.round((Date.now() - startTime) / 1000), stats: { stories_completed: completed, stories_skipped: skipped, total_commits: completed, files_created: 0, files_modified: 0 } })
