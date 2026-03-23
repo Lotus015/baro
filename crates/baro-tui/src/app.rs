@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -119,7 +117,6 @@ pub struct App {
     pub completed: u32,
     pub total: u32,
     pub percentage: u32,
-    pub current_level: usize,
     pub start_time: Instant,
     pub done: bool,
     pub final_stats: Option<DoneStats>,
@@ -161,7 +158,6 @@ impl App {
             completed: 0,
             total: 0,
             percentage: 0,
-            current_level: 0,
             start_time: Instant::now(),
             done: false,
             final_stats: None,
@@ -172,10 +168,6 @@ impl App {
             selected_log_index: 0,
             tick_count: 0,
         }
-    }
-
-    pub fn tick(&mut self) {
-        self.tick_count += 1;
     }
 
     // Screen transitions
@@ -309,7 +301,6 @@ impl App {
                         start_time: Instant::now(),
                     },
                 );
-                self.update_current_level();
             }
 
             BaroEvent::StoryLog { id, line } => {
@@ -396,24 +387,6 @@ impl App {
                 self.done = true;
                 self.total_time_secs = total_time_secs;
                 self.final_stats = Some(stats);
-            }
-        }
-    }
-
-    fn update_current_level(&mut self) {
-        for (i, level) in self.dag_levels.iter().enumerate() {
-            let any_active = level.iter().any(|id| {
-                self.stories.iter().any(|s| {
-                    s.id == *id
-                        && matches!(
-                            s.status,
-                            StoryStatus::Running | StoryStatus::Retrying(_)
-                        )
-                })
-            });
-            if any_active {
-                self.current_level = i;
-                return;
             }
         }
     }
