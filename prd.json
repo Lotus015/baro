@@ -31,15 +31,15 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-23T18:33:52.135222+00:00",
       "dependsOn": [
         "S1",
         "S2"
       ],
       "description": "After S1 and S2 deletions, verify the tsup build script in package.json ('tsup src/core/openai-planner.ts --format esm') still compiles successfully. The build entry point is openai-planner.ts which imports only from planner.ts, stream.ts, tools.ts, and prd.ts — all of which are kept. If the build fails, fix any issues. Also verify there are no stale references to deleted files in tsconfig.json or package.json that need cleanup.",
-      "durationSecs": null,
+      "durationSecs": 54,
       "id": "S3",
-      "passes": false,
+      "passes": true,
       "priority": 3,
       "retries": 2,
       "tests": [],
