@@ -8,6 +8,7 @@ use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::app::ReviewStory;
+use crate::dag::build_dag;
 use crate::events::BaroEvent;
 
 // ─── PRD types (for reading/writing prd.json) ───────────────
@@ -47,87 +48,6 @@ pub struct PrdStory {
 
 fn default_retries() -> u32 {
     2
-}
-
-// ─── DAG Engine (Kahn's algorithm) ──────────────────────────
-
-struct DagLevel {
-    story_ids: Vec<String>,
-}
-
-fn build_dag(stories: &[PrdStory]) -> Result<Vec<DagLevel>, String> {
-    let incomplete: Vec<&PrdStory> = stories.iter().filter(|s| !s.passes).collect();
-    let completed_ids: std::collections::HashSet<&str> = stories
-        .iter()
-        .filter(|s| s.passes)
-        .map(|s| s.id.as_str())
-        .collect();
-    let story_map: HashMap<&str, &PrdStory> =
-        incomplete.iter().map(|s| (s.id.as_str(), *s)).collect();
-
-    // Build in-degree and reverse edges
-    let mut in_degree: HashMap<&str, usize> = HashMap::new();
-    let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
-
-    for s in &incomplete {
-        let active_deps: Vec<&str> = s
-            .depends_on
-            .iter()
-            .map(|d| d.as_str())
-            .filter(|d| story_map.contains_key(d) && !completed_ids.contains(d))
-            .collect();
-        in_degree.insert(s.id.as_str(), active_deps.len());
-        for dep in active_deps {
-            dependents.entry(dep).or_default().push(s.id.as_str());
-        }
-    }
-
-    let mut levels: Vec<DagLevel> = Vec::new();
-    let mut queue: Vec<&PrdStory> = incomplete
-        .iter()
-        .filter(|s| *in_degree.get(s.id.as_str()).unwrap_or(&0) == 0)
-        .copied()
-        .collect();
-
-    while !queue.is_empty() {
-        queue.sort_by_key(|s| s.priority);
-        let ids: Vec<String> = queue.iter().map(|s| s.id.clone()).collect();
-        levels.push(DagLevel { story_ids: ids });
-
-        let mut next_queue: Vec<&PrdStory> = Vec::new();
-        for s in &queue {
-            if let Some(deps) = dependents.get(s.id.as_str()) {
-                for dep_id in deps {
-                    if let Some(deg) = in_degree.get_mut(dep_id) {
-                        *deg = deg.saturating_sub(1);
-                        if *deg == 0 {
-                            if let Some(story) = story_map.get(dep_id) {
-                                next_queue.push(story);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        queue = next_queue;
-    }
-
-    // Cycle detection
-    let total_in_levels: usize = levels.iter().map(|l| l.story_ids.len()).sum();
-    if total_in_levels != incomplete.len() {
-        let placed: std::collections::HashSet<&str> = levels
-            .iter()
-            .flat_map(|l| l.story_ids.iter().map(|s| s.as_str()))
-            .collect();
-        let cycled: Vec<&str> = incomplete
-            .iter()
-            .filter(|s| !placed.contains(s.id.as_str()))
-            .map(|s| s.id.as_str())
-            .collect();
-        return Err(format!("Dependency cycle detected: {}", cycled.join(", ")));
-    }
-
-    Ok(levels)
 }
 
 // ─── Story prompt builder ───────────────────────────────────
