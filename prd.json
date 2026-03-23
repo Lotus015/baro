@@ -1,13 +1,13 @@
 {
   "project": "baro-review-agent",
   "branchName": "feat/review-agent",
-  "description": "Add inter-level review agent that checks completed work and creates fix stories if needed",
+  "description": "Add a review agent that runs between DAG levels to check completed work and create fix stories if needed",
   "userStories": [
     {
       "id": "S1",
       "priority": 1,
       "title": "Add review event types to events.rs",
-      "description": "Add three new variants to the BaroEvent enum in crates/baro-tui/src/events.rs: ReviewStart { level: usize }, ReviewLog { line: String }, ReviewComplete { level: usize, passed: bool, fix_count: u32 }. Each variant needs a serde rename attribute matching the snake_case pattern used by existing variants (e.g. #[serde(rename = \"review_start\")]). Keep the existing Deserialize, Clone, Debug derives working.",
+      "description": "Add three new event variants to the BaroEvent enum in crates/baro-tui/src/events.rs: ReviewStart { level: usize }, ReviewLog { line: String }, ReviewComplete { level: usize, passed: bool, fix_count: u32 }. These must use serde rename tags matching the existing pattern (e.g. #[serde(rename = \"review_start\")]). Do not modify any existing variants.",
       "dependsOn": [],
       "retries": 2,
       "acceptance": [],
@@ -19,9 +19,11 @@
     {
       "id": "S2",
       "priority": 2,
-      "title": "Add git commit hash helper to git.rs",
-      "description": "Add a public async function get_commit_hash(cwd: &Path) -> Result<String, String> to crates/baro-tui/src/git.rs that runs 'git rev-parse HEAD' and returns the trimmed commit hash string. Follow the same pattern as the existing get_current_branch function. Make it pub(crate).",
-      "dependsOn": [],
+      "title": "Add review tracking state to App and handle review events",
+      "description": "In crates/baro-tui/src/app.rs: 1) Add three new fields to the App struct: review_in_progress: bool, review_level: usize, review_logs: Vec<String>. 2) Initialize them in App::new() (false, 0, empty vec). 3) Add match arms in handle_event() for the three new review events: ReviewStart sets review_in_progress=true and review_level=level and clears review_logs. ReviewLog appends line to review_logs (cap at MAX_LOG_LINES like story logs). ReviewComplete sets review_in_progress=false. Do not modify any existing event handling logic.",
+      "dependsOn": [
+        "S1"
+      ],
       "retries": 2,
       "acceptance": [],
       "tests": [],
@@ -32,8 +34,8 @@
     {
       "id": "S3",
       "priority": 3,
-      "title": "Add review tracking state to App",
-      "description": "In crates/baro-tui/src/app.rs: 1) Add three fields to the App struct: review_in_progress: bool, review_level: usize, review_logs: Vec<String>. 2) Initialize them in App::new() (false, 0, empty vec). 3) In handle_event(), add match arms for the three new BaroEvent variants: ReviewStart sets review_in_progress=true and review_level=level. ReviewLog appends line to review_logs (cap at MAX_LOG_LINES). ReviewComplete sets review_in_progress=false.",
+      "title": "Implement review agent in executor.rs",
+      "description": "In crates/baro-tui/src/executor.rs, add a review step in run_executor() that runs after all stories in each level complete but before moving to the next level. Implementation: 1) Before executing stories in a level, save the current git commit hash using 'git rev-parse HEAD'. 2) After all stories in a level complete (after the handles loop), run the review: a) Emit ReviewStart { level: level_index }. b) Run 'git diff SAVED_HASH HEAD' to get all changes. c) Collect acceptance criteria from all completed stories in this level. d) Spawn claude with --dangerously-skip-permissions --output-format json -p with a prompt including the diff and acceptance criteria asking it to output JSON: { \"passed\": boolean, \"fixes\": [{ \"title\": string, \"description\": string }] }. e) Parse the JSON response (extract from claude JSON wrapper like run_claude_planner does). f) If passed=true, emit ReviewComplete { level, passed: true, fix_count: 0 } and continue. g) If passed=false, create PrdStory entries for each fix with ids like S{original}-fix{n}, execute them using execute_story (they get committed and pushed), then re-review with a new diff from SAVED_HASH to HEAD. h) Maximum 2 review-fix cycles per level - if after 2 rounds review still fails, log a warning via ReviewLog and emit ReviewComplete with passed=false, then continue to next level. Stream review claude output as ReviewLog events. Skip review if no stories in the level completed successfully.",
       "dependsOn": [
         "S1"
       ],
@@ -47,12 +49,10 @@
     {
       "id": "S4",
       "priority": 4,
-      "title": "Implement review agent logic in executor.rs",
-      "description": "In crates/baro-tui/src/executor.rs, add a review step in run_executor() that runs after each level completes. Implementation: 1) Before the level's story loop, save the commit hash using crate::git::get_commit_hash(&cwd). 2) After all handles for a level are collected, run a review function. 3) The review function: a) Emits ReviewStart { level: level_index }. b) Runs 'git diff SAVED_HASH HEAD' to get the diff. c) Collects acceptance criteria from all completed stories in this level. d) Spawns 'claude --dangerously-skip-permissions --output-format json -p' with a prompt including the diff and acceptance criteria asking for JSON { passed: boolean, fixes: [{ title: string, description: string }] }. e) Parses the JSON response. If passed=true, emits ReviewComplete { level, passed: true, fix_count: 0 }. f) If passed=false, creates new PrdStory entries for each fix with ids like S{N}-fix1, S{N}-fix2 where N is the first story of the level. Executes them as regular stories (they get committed and pushed). Then re-reviews with a new diff from SAVED_HASH to HEAD. g) Maximum 2 review-fix cycles per level. If still failing after 2 rounds, log a warning and emit ReviewComplete with passed=false and continue. Throughout, emit ReviewLog events for status updates. Handle errors gracefully - if review agent fails to parse JSON or claude fails, log warning and continue to next level.",
+      "title": "Update TUI dashboard to display review status",
+      "description": "In crates/baro-tui/src/screens/execute_dashboard.rs: 1) In the render_story_list function, when app.review_in_progress is true, add a line after the stories of the current review level showing 'Reviewing Level N...' in cyan with a spinner character (use app.tick_count to cycle through spinner chars like ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏']). 2) In the render_logs function, when app.review_in_progress is true and active_ids is empty (no stories actively running), show the review_logs in the log panel instead of the 'Waiting for next story...' message. Use a similar scrolling pattern as story logs. When review_in_progress is false but review_logs is not empty and no stories are active, optionally show review logs as fallback content.",
       "dependsOn": [
-        "S1",
-        "S2",
-        "S3"
+        "S2"
       ],
       "retries": 2,
       "acceptance": [],
@@ -64,26 +64,11 @@
     {
       "id": "S5",
       "priority": 5,
-      "title": "Add review status display to TUI dashboard",
-      "description": "In crates/baro-tui/src/screens/execute_dashboard.rs: 1) In the story list panel (render_story_list), after rendering all stories in a level, if app.review_in_progress is true and app.review_level matches the current level index, add a line like 'Reviewing Level N...' in cyan with a spinner character (use app.tick_count to rotate through spinner chars like ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏']). 2) In the logs panel (render_logs), when no active stories exist but review_in_progress is true, show the review_logs from app.review_logs instead of the 'Waiting for next story...' message. Use a 'Review' title for the log block.",
+      "title": "Final build verification - zero warnings",
+      "description": "Run cargo build on the entire project and fix any warnings or errors. Check for unused imports, unused variables, dead code warnings, or any other compiler warnings across all modified files (events.rs, app.rs, executor.rs, execute_dashboard.rs). Fix all issues. Ensure the project compiles cleanly with zero warnings. Run cargo build (not just cargo check) to ensure full compilation succeeds.",
       "dependsOn": [
         "S3",
         "S4"
-      ],
-      "retries": 2,
-      "acceptance": [],
-      "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
-    },
-    {
-      "id": "S6",
-      "priority": 6,
-      "title": "Final build verification - zero warnings",
-      "description": "Run cargo build for the entire workspace and fix any warnings or errors. Check for unused imports, unused variables, dead code warnings, etc. Ensure cargo build completes with zero warnings and zero errors. Do NOT add #[allow(dead_code)] or similar suppression attributes - fix the actual issues instead. Read every file that was modified by previous stories (events.rs, git.rs, app.rs, executor.rs, execute_dashboard.rs) and verify correctness.",
-      "dependsOn": [
-        "S5"
       ],
       "retries": 2,
       "acceptance": [],
