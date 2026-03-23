@@ -166,153 +166,6 @@ fn parse_claude_stream_line(line: &str, _story_id: &str) -> Vec<String> {
     logs
 }
 
-// ─── Git file stats ─────────────────────────────────────────
-
-async fn get_git_file_stats(cwd: &Path) -> (u32, u32) {
-    let output = Command::new("git")
-        .args(["diff", "--name-status", "HEAD~1", "HEAD"])
-        .current_dir(cwd)
-        .output()
-        .await;
-
-    let Ok(output) = output else {
-        return (0, 0);
-    };
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut created = 0u32;
-    let mut modified = 0u32;
-    for line in text.lines() {
-        if line.starts_with('A') {
-            created += 1;
-        } else if line.starts_with('M') || line.starts_with('R') {
-            modified += 1;
-        }
-    }
-    (created, modified)
-}
-
-// ─── Update prd.json ────────────────────────────────────────
-
-fn update_prd_story(prd_path: &Path, story_id: &str, duration_secs: u64) -> std::io::Result<()> {
-    let content = std::fs::read_to_string(prd_path)?;
-    let mut prd: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-    if let Some(stories) = prd.get_mut("userStories").and_then(|s| s.as_array_mut()) {
-        for story in stories {
-            if story.get("id").and_then(|id| id.as_str()) == Some(story_id) {
-                story["passes"] = serde_json::Value::Bool(true);
-                story["completedAt"] =
-                    serde_json::Value::String(chrono::Utc::now().to_rfc3339());
-                story["durationSecs"] =
-                    serde_json::Value::Number(serde_json::Number::from(duration_secs));
-            }
-        }
-    }
-
-    let output = serde_json::to_string_pretty(&prd)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    std::fs::write(prd_path, format!("{}\n", output))?;
-    Ok(())
-}
-
-// ─── Push with retry ────────────────────────────────────────
-
-async fn git_push_with_retry(
-    git_mutex: &Mutex<()>,
-    cwd: &Path,
-    story_id: &str,
-    tx: &mpsc::Sender<BaroEvent>,
-) -> Result<(), String> {
-    let _git_lock = git_mutex.lock().await;
-
-    // Get current branch
-    let branch = Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(cwd)
-        .output()
-        .await
-        .map_err(|e| format!("Failed to get branch: {}", e))?;
-
-    let branch_name = String::from_utf8_lossy(&branch.stdout).trim().to_string();
-    if branch_name.is_empty() {
-        return Err("Could not determine current branch".to_string());
-    }
-
-    let max_attempts = 3;
-    for attempt in 1..=max_attempts {
-        let _ = tx
-            .send(BaroEvent::StoryLog {
-                id: story_id.to_string(),
-                line: "[git] pushing...".to_string(),
-            })
-            .await;
-
-        let push = Command::new("git")
-            .args(["push", "origin", &branch_name])
-            .current_dir(cwd)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to push: {}", e))?;
-
-        if push.status.success() {
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: story_id.to_string(),
-                    line: "[git] push ok".to_string(),
-                })
-                .await;
-            return Ok(());
-        }
-
-        if attempt == max_attempts {
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: story_id.to_string(),
-                    line: "[git] push failed after 3 attempts".to_string(),
-                })
-                .await;
-            let stderr = String::from_utf8_lossy(&push.stderr).trim().to_string();
-            return Err(format!("Push failed after 3 attempts: {}", stderr));
-        }
-
-        // Pull --rebase and retry
-        let _ = tx
-            .send(BaroEvent::StoryLog {
-                id: story_id.to_string(),
-                line: "[git] push failed, pulling and retrying...".to_string(),
-            })
-            .await;
-
-        let pull = Command::new("git")
-            .args(["pull", "--rebase", "origin", &branch_name])
-            .current_dir(cwd)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to pull --rebase: {}", e))?;
-
-        if !pull.status.success() {
-            // Rebase conflict — abort and return error
-            let _ = Command::new("git")
-                .args(["rebase", "--abort"])
-                .current_dir(cwd)
-                .output()
-                .await;
-
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: story_id.to_string(),
-                    line: "[git] conflict detected, skipping".to_string(),
-                })
-                .await;
-            return Err("Rebase conflict detected, push skipped".to_string());
-        }
-    }
-
-    unreachable!()
-}
-
 // ─── Execute a single story ─────────────────────────────────
 
 async fn execute_story(
@@ -343,17 +196,7 @@ async fn execute_story(
                 })
                 .await;
 
-            // Get current branch
-            let branch_output = Command::new("git")
-                .args(["branch", "--show-current"])
-                .current_dir(cwd)
-                .output()
-                .await
-                .map_err(|e| format!("Failed to get branch: {}", e))?;
-
-            let branch_name = String::from_utf8_lossy(&branch_output.stdout)
-                .trim()
-                .to_string();
+            let branch_name = crate::git::get_current_branch(cwd).await?;
 
             let pull_output = Command::new("git")
                 .args(["pull", "--rebase", "origin", &branch_name])
@@ -411,15 +254,15 @@ async fn execute_story(
                     let _git_lock = git_mutex.lock().await;
 
                     // Update prd.json
-                    let _ = update_prd_story(prd_path, &story.id, duration_secs);
+                    let _ = crate::git::update_prd_story(prd_path, &story.id, duration_secs);
 
                     // Get git stats
-                    get_git_file_stats(cwd).await
+                    crate::git::get_git_file_stats(cwd).await
                 };
 
                 // Push with retry (acquires git_mutex internally)
                 let push_result =
-                    git_push_with_retry(git_mutex, cwd, &story.id, tx).await;
+                    crate::git::git_push_with_retry(git_mutex, cwd, &story.id, tx).await;
                 let (push_success, push_error) = match &push_result {
                     Ok(()) => (true, None),
                     Err(e) => (false, Some(e.clone())),
@@ -709,7 +552,7 @@ pub async fn run_executor(
             }
         }
 
-        git_push_with_retry(&git_mutex, &cwd, "prd", &tx).await
+        crate::git::git_push_with_retry(&git_mutex, &cwd, "prd", &tx).await
     }
     .await;
 

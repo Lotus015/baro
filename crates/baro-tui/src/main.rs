@@ -2,6 +2,7 @@ mod app;
 mod dag;
 mod events;
 mod executor;
+mod git;
 mod screens;
 mod theme;
 mod ui;
