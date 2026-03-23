@@ -124,6 +124,9 @@ pub struct App {
     pub final_stats: Option<DoneStats>,
     pub total_time_secs: u64,
 
+    // Push tracking
+    pub push_results: Vec<(String, bool, Option<String>)>,
+
     // Parallelism tracking (for sparkline)
     pub parallelism_history: Vec<u64>,
 
@@ -161,6 +164,7 @@ impl App {
             done: false,
             final_stats: None,
             total_time_secs: 0,
+            push_results: Vec::new(),
             parallelism_history: Vec::new(),
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
@@ -351,6 +355,21 @@ impl App {
                 self.completed = completed;
                 self.total = total;
                 self.percentage = percentage;
+            }
+
+            BaroEvent::PushStatus { id, success, error } => {
+                if let Some(active) = self.active_stories.get_mut(&id) {
+                    if success {
+                        active.logs.push(format!("[push] Successfully pushed {}", id));
+                    } else {
+                        active.logs.push(format!(
+                            "[push] Failed to push {}: {}",
+                            id,
+                            error.as_deref().unwrap_or("unknown error")
+                        ));
+                    }
+                }
+                self.push_results.push((id, success, error));
             }
 
             BaroEvent::Done {

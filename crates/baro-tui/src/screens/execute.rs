@@ -234,7 +234,7 @@ fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
 
     if app.dag_levels.is_empty() {
         for story in &app.stories {
-            items.push(story_list_item(story));
+            items.push(story_list_item(story, &app.push_results));
         }
     } else {
         for (i, level) in app.dag_levels.iter().enumerate() {
@@ -245,7 +245,7 @@ fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
 
             for story_id in level {
                 if let Some(story) = app.stories.iter().find(|s| s.id == *story_id) {
-                    items.push(story_list_item(story));
+                    items.push(story_list_item(story, &app.push_results));
                 }
             }
 
@@ -270,7 +270,10 @@ fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(list, area);
 }
 
-fn story_list_item(story: &crate::app::StoryState) -> ListItem<'static> {
+fn story_list_item(
+    story: &crate::app::StoryState,
+    push_results: &[(String, bool, Option<String>)],
+) -> ListItem<'static> {
     let (icon, style) = match &story.status {
         StoryStatus::Complete => ("✓", Style::default().fg(theme::SUCCESS)),
         StoryStatus::Running => ("▶", Style::default().fg(theme::WARNING)),
@@ -290,7 +293,21 @@ fn story_list_item(story: &crate::app::StoryState) -> ListItem<'static> {
         _ => String::new(),
     };
 
-    ListItem::new(Line::from(vec![
+    let push_indicator = if story.status == StoryStatus::Complete {
+        if let Some((_, success, _)) = push_results.iter().find(|(id, _, _)| id == &story.id) {
+            if *success {
+                Some(Span::styled(" ↑", Style::default().fg(theme::SUCCESS)))
+            } else {
+                Some(Span::styled(" ↑!", Style::default().fg(theme::ERROR)))
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let mut spans = vec![
         Span::raw("   "),
         Span::styled(
             format!(
@@ -299,7 +316,12 @@ fn story_list_item(story: &crate::app::StoryState) -> ListItem<'static> {
             ),
             style,
         ),
-    ]))
+    ];
+    if let Some(indicator) = push_indicator {
+        spans.push(indicator);
+    }
+
+    ListItem::new(Line::from(spans))
 }
 
 fn render_logs(f: &mut Frame, app: &App, area: Rect) {
