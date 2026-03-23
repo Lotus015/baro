@@ -87,7 +87,6 @@ Rules:
 - Output ONLY the JSON, nothing else"#;
 
 #[derive(serde::Deserialize)]
-#[allow(dead_code)]
 struct PrdOutput {
     project: String,
     #[serde(default)]
