@@ -23,6 +23,54 @@ pub(crate) async fn get_current_branch(cwd: &Path) -> Result<String, String> {
     Ok(branch_name)
 }
 
+// ─── Create or checkout branch ───────────────────────────────
+
+#[allow(dead_code)]
+pub async fn create_or_checkout_branch(cwd: &Path, branch_name: &str) -> Result<(), String> {
+    // Try creating a new branch
+    let create = Command::new("git")
+        .args(["checkout", "-b", branch_name])
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run git checkout -b: {}", e))?;
+
+    if !create.status.success() {
+        // Branch likely exists, try checking it out
+        let checkout = Command::new("git")
+            .args(["checkout", branch_name])
+            .current_dir(cwd)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run git checkout: {}", e))?;
+
+        if !checkout.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout.stderr).trim().to_string();
+            return Err(format!("Failed to checkout branch '{}': {}", branch_name, stderr));
+        }
+    }
+
+    // Best-effort push with upstream tracking
+    let push = Command::new("git")
+        .args(["push", "-u", "origin", branch_name])
+        .current_dir(cwd)
+        .output()
+        .await;
+
+    match push {
+        Ok(output) if !output.status.success() => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            eprintln!("[git] push -u origin {} failed (best-effort): {}", branch_name, stderr);
+        }
+        Err(e) => {
+            eprintln!("[git] push -u origin {} failed (best-effort): {}", branch_name, e);
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
 // ─── Safe pull rebase (best-effort, never fatal) ────────────
 
 pub(crate) async fn safe_pull_rebase(
