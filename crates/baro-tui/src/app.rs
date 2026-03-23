@@ -132,8 +132,6 @@ pub struct App {
     pub review_logs: Vec<String>,
 
     // Resume mode
-    #[allow(dead_code)]
-    pub resume_mode: bool,
     pub is_resume: bool,
 
     // UI state
@@ -174,7 +172,6 @@ impl App {
             review_in_progress: false,
             review_level: 0,
             review_logs: Vec::new(),
-            resume_mode: false,
             is_resume: false,
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
@@ -402,8 +399,14 @@ impl App {
                 self.review_logs.push(line);
             }
 
-            BaroEvent::ReviewComplete { .. } => {
+            BaroEvent::ReviewComplete { level, passed, fix_count } => {
                 self.review_in_progress = false;
+                self.review_logs.push(format!(
+                    "Level {} review: {} ({})",
+                    level,
+                    if passed { "passed" } else { "fixes needed" },
+                    fix_count,
+                ));
             }
 
             BaroEvent::Done {

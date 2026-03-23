@@ -94,7 +94,9 @@ pub fn render(f: &mut Frame, app: &App) {
         f.render_widget(p, box_area);
 
         let hint = Paragraph::new(Line::from(vec![
-            Span::styled("q", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled("r", Style::default().fg(theme::SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(" retry   ", Style::default().fg(theme::MUTED)),
+            Span::styled("q", Style::default().fg(theme::ERROR).add_modifier(Modifier::BOLD)),
             Span::styled(" quit", Style::default().fg(theme::MUTED)),
         ]))
         .alignment(Alignment::Center);

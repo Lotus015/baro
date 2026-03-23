@@ -247,6 +247,13 @@ async fn run_app(
                     },
                     Screen::Planning => match key.code {
                         KeyCode::Esc | KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('r') => {
+                            if app.planning_error.is_some() {
+                                app.planning_error = None;
+                                app.start_planning();
+                                spawn_planner(&app, &cwd, tx.clone());
+                            }
+                        }
                         _ => {}
                     },
                     Screen::Review => match key.code {

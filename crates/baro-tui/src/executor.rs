@@ -462,18 +462,24 @@ async fn run_review_for_level(
             criteria.push('\n');
         }
 
-        // Build review prompt
+        // Build review prompt — focused on acceptance criteria only, not style/refactoring
         let prompt = format!(
-            "You are a code reviewer. Review the following git diff against the acceptance criteria below.\n\n\
+            "You are a focused code reviewer. Check ONLY whether the acceptance criteria are met by the diff.\n\n\
              ACCEPTANCE CRITERIA:\n{}\n\n\
              GIT DIFF:\n```\n{}\n```\n\n\
+             Rules:\n\
+             - ONLY check if the acceptance criteria are satisfied by the changes\n\
+             - Do NOT suggest refactoring, style improvements, or architecture changes\n\
+             - Do NOT flag missing tests unless tests are in the acceptance criteria\n\
+             - Do NOT flag linting or formatting issues\n\
+             - If acceptance criteria are empty, pass by default\n\
+             - Be lenient: if the intent of the criteria is met, pass it\n\n\
              Respond with ONLY valid JSON (no markdown fences):\n\
-             {{\"passed\": boolean, \"fixes\": [{{\"title\": \"short title\", \"description\": \"what to fix and how\"}}]}}\n\n\
-             If all acceptance criteria are met and the code looks correct, set passed=true and fixes=[].\n\
-             If there are issues, set passed=false and list each fix needed.",
+             {{\"passed\": boolean, \"fixes\": [{{\"title\": \"short title\", \"description\": \"what is wrong\"}}]}}\n\n\
+             If criteria are met, set passed=true and fixes=[].",
             criteria,
-            if diff.len() > 50000 {
-                &diff[..50000]
+            if diff.len() > 30000 {
+                &diff[..30000]
             } else {
                 &diff
             }

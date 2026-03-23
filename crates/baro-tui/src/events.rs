@@ -95,7 +95,6 @@ pub enum BaroEvent {
     },
 
     #[serde(rename = "review_complete")]
-    #[allow(dead_code)]
     ReviewComplete {
         level: usize,
         passed: bool,
