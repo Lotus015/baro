@@ -154,11 +154,39 @@ async fn run_app(
 
     let (tx, mut rx) = mpsc::channel::<AppEvent>(256);
 
-    // If goal provided via CLI, skip welcome and start planning immediately
-    if let Some(goal) = cli.goal {
-        app.goal_input = goal;
-        app.start_planning();
-        spawn_planner(&app, &cwd, tx.clone());
+    // Resume detection: check for existing prd.json with incomplete stories
+    let prd_path = cwd.join("prd.json");
+    let mut entered_resume = false;
+    if prd_path.exists() {
+        if let Ok(prd_contents) = std::fs::read_to_string(&prd_path) {
+            if let Ok(prd) = serde_json::from_str::<executor::PrdFile>(&prd_contents) {
+                let has_incomplete = prd.user_stories.iter().any(|s| !s.passes);
+                if cli.resume || (has_incomplete && cli.goal.is_none()) {
+                    app.is_resume = true;
+                    app.project = prd.project.clone();
+                    app.branch_name = prd.branch_name.clone();
+                    app.description = prd.description.clone();
+                    let stories: Vec<ReviewStory> = prd.user_stories.iter().map(|s| ReviewStory {
+                        id: s.id.clone(),
+                        title: s.title.clone(),
+                        description: s.description.clone(),
+                        depends_on: s.depends_on.clone(),
+                        completed: s.passes,
+                    }).collect();
+                    app.show_review(stories);
+                    entered_resume = true;
+                }
+            }
+        }
+    }
+
+    // If goal provided via CLI (and not resuming), skip welcome and start planning immediately
+    if !entered_resume {
+        if let Some(goal) = cli.goal {
+            app.goal_input = goal;
+            app.start_planning();
+            spawn_planner(&app, &cwd, tx.clone());
+        }
     }
 
     // Keyboard input from /dev/tty
@@ -224,31 +252,59 @@ async fn run_app(
                     Screen::Review => match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                         KeyCode::Enter => {
-                            // Write prd.json and start execution
-                            let prd = executor::prd_from_review(
-                                &app.project,
-                                &app.branch_name,
-                                &app.description,
-                                &app.review_stories,
-                            );
-                            if let Err(e) = executor::write_prd(&prd, &cwd) {
-                                app.planning_error = Some(format!("Failed to write prd.json: {}", e));
-                            } else {
-                                // Create git branch baro/<branchName>
-                                let full_branch = format!("baro/{}", app.branch_name);
-                                let branch_cwd = cwd.clone();
-                                let branch_name_clone = full_branch.clone();
-                                app.branch_name = full_branch;
-                                app.start_execution();
-                                let exec_prd = prd;
-                                let exec_cwd = cwd.clone();
-                                let branch_tx = tx.clone();
-                                tokio::spawn(async move {
-                                    if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
-                                        eprintln!("[baro] branch creation failed: {}", e);
+                            if app.is_resume {
+                                // Resume mode: read existing prd.json (has full acceptance/tests data)
+                                let prd_path = cwd.join("prd.json");
+                                match std::fs::read_to_string(&prd_path)
+                                    .map_err(|e| e.to_string())
+                                    .and_then(|c| serde_json::from_str::<executor::PrdFile>(&c).map_err(|e| e.to_string()))
+                                {
+                                    Ok(prd) => {
+                                        let full_branch = format!("baro/{}", prd.branch_name);
+                                        let branch_cwd = cwd.clone();
+                                        let branch_name_clone = full_branch.clone();
+                                        app.branch_name = full_branch;
+                                        app.start_execution();
+                                        let exec_cwd = cwd.clone();
+                                        let branch_tx = tx.clone();
+                                        tokio::spawn(async move {
+                                            if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
+                                                eprintln!("[baro] branch checkout failed: {}", e);
+                                            }
+                                            spawn_executor(prd, exec_cwd, branch_tx);
+                                        });
                                     }
-                                    spawn_executor(exec_prd, exec_cwd, branch_tx);
-                                });
+                                    Err(e) => {
+                                        app.planning_error = Some(format!("Failed to read prd.json: {}", e));
+                                    }
+                                }
+                            } else {
+                                // Normal mode: write prd.json and start execution
+                                let prd = executor::prd_from_review(
+                                    &app.project,
+                                    &app.branch_name,
+                                    &app.description,
+                                    &app.review_stories,
+                                );
+                                if let Err(e) = executor::write_prd(&prd, &cwd) {
+                                    app.planning_error = Some(format!("Failed to write prd.json: {}", e));
+                                } else {
+                                    // Create git branch baro/<branchName>
+                                    let full_branch = format!("baro/{}", app.branch_name);
+                                    let branch_cwd = cwd.clone();
+                                    let branch_name_clone = full_branch.clone();
+                                    app.branch_name = full_branch;
+                                    app.start_execution();
+                                    let exec_prd = prd;
+                                    let exec_cwd = cwd.clone();
+                                    let branch_tx = tx.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
+                                            eprintln!("[baro] branch creation failed: {}", e);
+                                        }
+                                        spawn_executor(exec_prd, exec_cwd, branch_tx);
+                                    });
+                                }
                             }
                         }
                         KeyCode::Up | KeyCode::Char('k') => app.review_prev(),
