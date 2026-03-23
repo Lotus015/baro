@@ -116,11 +116,6 @@ pub fn render(f: &mut Frame, app: &App) {
 
     let inner_height = chunks[1].height.saturating_sub(2) as usize;
     let total_lines = lines.len();
-    let scroll_offset = if app.review_scroll * 4 > inner_height {
-        (app.review_scroll * 4).saturating_sub(inner_height / 2)
-    } else {
-        0
-    };
 
     let plan = Paragraph::new(lines)
         .block(
@@ -134,14 +129,14 @@ pub fn render(f: &mut Frame, app: &App) {
                         .add_modifier(Modifier::BOLD),
                 )),
         )
-        .scroll((scroll_offset as u16, 0))
+        .scroll((app.review_scroll_offset, 0))
         .wrap(Wrap { trim: false });
     f.render_widget(plan, chunks[1]);
 
     // Scrollbar
     if total_lines > inner_height {
         let mut scrollbar_state = ScrollbarState::new(total_lines.saturating_sub(inner_height))
-            .position(scroll_offset);
+            .position(app.review_scroll_offset as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(theme::ACCENT_DIM))
             .begin_symbol(Some("\u{25b2}"))
