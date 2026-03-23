@@ -185,59 +185,10 @@ async fn execute_story(
             })
             .await;
 
-        // Git pull --rebase before running claude
+        // Git pull --rebase before running claude (best-effort, never fatal)
         {
             let _git_lock = git_mutex.lock().await;
-
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: story.id.clone(),
-                    line: "[git] pulling latest...".to_string(),
-                })
-                .await;
-
-            let branch_name = crate::git::get_current_branch(cwd).await?;
-
-            let pull_output = Command::new("git")
-                .args(["pull", "--rebase", "origin", &branch_name])
-                .current_dir(cwd)
-                .output()
-                .await
-                .map_err(|e| format!("Failed to run git pull: {}", e))?;
-
-            if pull_output.status.success() {
-                let _ = tx
-                    .send(BaroEvent::StoryLog {
-                        id: story.id.clone(),
-                        line: "[git] pull ok".to_string(),
-                    })
-                    .await;
-            } else {
-                // Abort the failed rebase
-                let _ = Command::new("git")
-                    .args(["rebase", "--abort"])
-                    .current_dir(cwd)
-                    .output()
-                    .await;
-
-                let _ = tx
-                    .send(BaroEvent::StoryLog {
-                        id: story.id.clone(),
-                        line: "[git] conflict detected on pull, skipping".to_string(),
-                    })
-                    .await;
-
-                let _ = tx
-                    .send(BaroEvent::StoryError {
-                        id: story.id.clone(),
-                        error: "git pull --rebase conflict".to_string(),
-                        attempt,
-                        max_retries: max_attempts,
-                    })
-                    .await;
-
-                return Err("git pull --rebase conflict".to_string());
-            }
+            crate::git::safe_pull_rebase(cwd, &story.id, tx).await;
         }
 
         let start = Instant::now();

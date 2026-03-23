@@ -23,6 +23,119 @@ pub(crate) async fn get_current_branch(cwd: &Path) -> Result<String, String> {
     Ok(branch_name)
 }
 
+// ─── Safe pull rebase (best-effort, never fatal) ────────────
+
+pub(crate) async fn safe_pull_rebase(
+    cwd: &Path,
+    story_id: &str,
+    tx: &mpsc::Sender<BaroEvent>,
+) {
+    // Check if remote "origin" exists
+    let remote_check = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(cwd)
+        .output()
+        .await;
+
+    let has_remote = remote_check.map(|o| o.status.success()).unwrap_or(false);
+    if !has_remote {
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: story_id.to_string(),
+                line: "[git] no remote, skipping pull".to_string(),
+            })
+            .await;
+        return;
+    }
+
+    let branch_name = match get_current_branch(cwd).await {
+        Ok(b) => b,
+        Err(_) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: story_id.to_string(),
+                    line: "[git] no branch, skipping pull".to_string(),
+                })
+                .await;
+            return;
+        }
+    };
+
+    // Check if remote branch exists
+    let remote_branch_check = Command::new("git")
+        .args(["ls-remote", "--heads", "origin", &branch_name])
+        .current_dir(cwd)
+        .output()
+        .await;
+
+    let has_remote_branch = remote_branch_check
+        .map(|o| o.status.success() && !o.stdout.is_empty())
+        .unwrap_or(false);
+
+    if !has_remote_branch {
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: story_id.to_string(),
+                line: "[git] remote branch not found, skipping pull".to_string(),
+            })
+            .await;
+        return;
+    }
+
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: story_id.to_string(),
+            line: "[git] pulling latest...".to_string(),
+        })
+        .await;
+
+    // Stash any local changes (prd.json updates etc.)
+    let _ = Command::new("git")
+        .args(["stash", "--include-untracked"])
+        .current_dir(cwd)
+        .output()
+        .await;
+
+    // Pull --rebase
+    let pull = Command::new("git")
+        .args(["pull", "--rebase", "origin", &branch_name])
+        .current_dir(cwd)
+        .output()
+        .await;
+
+    let pull_ok = pull.map(|o| o.status.success()).unwrap_or(false);
+
+    if !pull_ok {
+        // Abort failed rebase
+        let _ = Command::new("git")
+            .args(["rebase", "--abort"])
+            .current_dir(cwd)
+            .output()
+            .await;
+
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: story_id.to_string(),
+                line: "[git] pull conflict, continuing without pull".to_string(),
+            })
+            .await;
+    } else {
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: story_id.to_string(),
+                line: "[git] pull ok".to_string(),
+            })
+            .await;
+    }
+
+    // Pop stash (best-effort)
+    let _ = Command::new("git")
+        .args(["stash", "pop"])
+        .current_dir(cwd)
+        .output()
+        .await;
+}
+
 // ─── Git file stats ──────────────────────────────────────────
 
 pub(crate) async fn get_git_file_stats(cwd: &Path) -> (u32, u32) {
@@ -83,6 +196,22 @@ pub(crate) async fn git_push_with_retry(
     tx: &mpsc::Sender<BaroEvent>,
 ) -> Result<(), String> {
     let _git_lock = git_mutex.lock().await;
+
+    // Check if remote exists
+    let remote_check = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(cwd)
+        .output()
+        .await;
+    if !remote_check.map(|o| o.status.success()).unwrap_or(false) {
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: story_id.to_string(),
+                line: "[git] no remote, skipping push".to_string(),
+            })
+            .await;
+        return Ok(());
+    }
 
     let branch_name = get_current_branch(cwd).await?;
 
