@@ -67,6 +67,11 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
         Span::styled(
+            &app.branch_name,
+            Style::default().fg(theme::MUTED),
+        ),
+        Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
+        Span::styled(
             format!("{} active", active_count),
             Style::default().fg(theme::WARNING),
         ),

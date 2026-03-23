@@ -25,7 +25,6 @@ pub(crate) async fn get_current_branch(cwd: &Path) -> Result<String, String> {
 
 // ─── Create or checkout branch ───────────────────────────────
 
-#[allow(dead_code)]
 pub async fn create_or_checkout_branch(cwd: &Path, branch_name: &str) -> Result<(), String> {
     // Try creating a new branch
     let create = Command::new("git")

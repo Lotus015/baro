@@ -234,8 +234,21 @@ async fn run_app(
                             if let Err(e) = executor::write_prd(&prd, &cwd) {
                                 app.planning_error = Some(format!("Failed to write prd.json: {}", e));
                             } else {
+                                // Create git branch baro/<branchName>
+                                let full_branch = format!("baro/{}", app.branch_name);
+                                let branch_cwd = cwd.clone();
+                                let branch_name_clone = full_branch.clone();
+                                app.branch_name = full_branch;
                                 app.start_execution();
-                                spawn_executor(prd, cwd.clone(), tx.clone());
+                                let exec_prd = prd;
+                                let exec_cwd = cwd.clone();
+                                let branch_tx = tx.clone();
+                                tokio::spawn(async move {
+                                    if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
+                                        eprintln!("[baro] branch creation failed: {}", e);
+                                    }
+                                    spawn_executor(exec_prd, exec_cwd, branch_tx);
+                                });
                             }
                         }
                         KeyCode::Up | KeyCode::Char('k') => app.review_prev(),
@@ -355,6 +368,7 @@ async fn run_claude_planner(goal: &str, cwd: &Path) -> Result<(Vec<ReviewStory>,
             title: s.title,
             description: s.description,
             depends_on: s.depends_on,
+            completed: false,
         })
         .collect();
 
@@ -411,6 +425,7 @@ async fn run_openai_planner(goal: &str, cwd: &Path) -> Result<(Vec<ReviewStory>,
             title: s.title,
             description: s.description,
             depends_on: s.depends_on,
+            completed: false,
         })
         .collect();
 
