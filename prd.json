@@ -1,49 +1,66 @@
 {
-  "branchName": "chore/remove-legacy-ts-files",
-  "description": "Delete legacy TypeScript files replaced by Rust rewrite",
-  "project": "legacy-ts-cleanup",
+  "branchName": "feat/git-coordination",
+  "description": "Add git mutex, pull-before-execute, push-with-retry, rebase conflict handling, and TUI git log lines to executor.rs",
+  "project": "baro-git-coordination",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T18:32:53.414326+00:00",
+      "completedAt": "2026-03-23T18:52:31.090064+00:00",
       "dependsOn": [],
-      "description": "Delete the following legacy core files that have been replaced by Rust: packages/baro-app/src/core/claude-planner.ts, packages/baro-app/src/core/cli-task.ts, packages/baro-app/src/core/dag.ts, packages/baro-app/src/core/events.ts, packages/baro-app/src/core/executor.ts, packages/baro-app/src/core/git.ts. DO NOT delete: planner.ts, stream.ts, tools.ts, openai-planner.ts, prd.ts — these are still used.",
-      "durationSecs": 27,
+      "description": "In executor.rs, create a shared tokio::sync::Mutex (e.g. `Arc<tokio::sync::Mutex<()>>`) called `git_mutex` in `run_executor`. Pass it into `execute_story` and wrap all git operations (commit, pull, push) in a lock guard so only one story at a time can perform git operations. This prevents conflicts when parallel stories finish simultaneously. The mutex should be created once in run_executor and passed via Arc clone to each spawned story task.",
+      "durationSecs": 114,
       "id": "S1",
       "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Delete legacy core TypeScript files"
+      "title": "Add git mutex for serialized git operations"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T18:32:57.226284+00:00",
-      "dependsOn": [],
-      "description": "Delete the entire packages/baro-app/src/screens/ directory (ApiKeyScreen.tsx, ExecuteScreen.tsx, PlanScreen.tsx, ReviewScreen.tsx) and the old Ink entry points: packages/baro-app/src/App.tsx and packages/baro-app/src/cli.tsx. These have been replaced by Rust ratatui screens.",
-      "durationSecs": 31,
+      "completedAt": "2026-03-23T18:53:24.244180+00:00",
+      "dependsOn": [
+        "S1"
+      ],
+      "description": "In executor.rs, before each story starts running claude (inside execute_story, before `run_claude_for_story`), acquire the git_mutex and run `git pull --rebase origin <branch>` where <branch> is the current branch (get it via `git branch --show-current`). Log '[git] pulling latest...' via StoryLog event. If the pull succeeds, log '[git] pull ok' and release the mutex. If the pull fails due to rebase conflicts, run `git rebase --abort`, log '[git] conflict detected on pull, skipping', send a StoryError event, and return Err to skip the story. The pull should happen inside the git_mutex lock.",
+      "durationSecs": 51,
       "id": "S2",
       "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
-      "title": "Delete legacy screens directory and Ink entry points"
+      "title": "Add git pull --rebase before story execution"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T18:33:52.135222+00:00",
+      "completedAt": "2026-03-23T18:54:36.895740+00:00",
       "dependsOn": [
-        "S1",
-        "S2"
+        "S1"
       ],
-      "description": "After S1 and S2 deletions, verify the tsup build script in package.json ('tsup src/core/openai-planner.ts --format esm') still compiles successfully. The build entry point is openai-planner.ts which imports only from planner.ts, stream.ts, tools.ts, and prd.ts — all of which are kept. If the build fails, fix any issues. Also verify there are no stale references to deleted files in tsconfig.json or package.json that need cleanup.",
-      "durationSecs": 54,
+      "description": "In executor.rs, replace the existing `auto_push` function with a new `git_push_with_retry` function that: 1) Acquires the git_mutex. 2) Logs '[git] pushing...' via StoryLog. 3) Attempts `git push origin <branch>`. 4) If push fails (likely due to remote changes), logs '[git] push failed, pulling and retrying...', runs `git pull --rebase origin <branch>`. If rebase conflicts, runs `git rebase --abort`, logs '[git] conflict detected, skipping', and returns Err. 5) Retries push up to 3 times total. 6) On success, logs '[git] push ok'. 7) On final failure after 3 attempts, logs '[git] push failed after 3 attempts'. Update execute_story to call this new function instead of auto_push. The function should accept the git_mutex, cwd, story_id, and tx sender.",
+      "durationSecs": 123,
       "id": "S3",
       "passes": true,
       "priority": 3,
       "retries": 2,
       "tests": [],
-      "title": "Verify tsup build still works for openai-planner"
+      "title": "Replace auto_push with push-with-retry logic"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S2",
+        "S3"
+      ],
+      "description": "Run a full `cargo build` to ensure everything compiles cleanly with no warnings related to the new git coordination code. Review all '[git] ...' log lines in executor.rs to ensure consistent formatting: '[git] pulling latest...', '[git] pull ok', '[git] pushing...', '[git] push ok', '[git] push failed, pulling and retrying...', '[git] conflict detected, skipping'. Fix any compilation errors or inconsistencies found.",
+      "durationSecs": null,
+      "id": "S4",
+      "passes": false,
+      "priority": 4,
+      "retries": 2,
+      "tests": [],
+      "title": "Verify full build and test git log output format"
     }
   ]
 }
