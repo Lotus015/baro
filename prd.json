@@ -1,79 +1,92 @@
 {
-  "branchName": "feat/review-agent",
-  "description": "Add a review agent that runs between DAG levels to check completed work and create fix stories if needed",
-  "project": "baro-review-agent",
+  "branchName": "feat/branch-per-execution-and-resume",
+  "description": "Add branch-per-execution on plan accept and resume interrupted execution from prd.json",
+  "project": "baro-branch-and-resume",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T19:55:05.856876+00:00",
+      "completedAt": "2026-03-23T20:09:57.621038+00:00",
       "dependsOn": [],
-      "description": "Add three new event variants to the BaroEvent enum in crates/baro-tui/src/events.rs: ReviewStart { level: usize }, ReviewLog { line: String }, ReviewComplete { level: usize, passed: bool, fix_count: u32 }. Each variant needs a serde rename attribute matching the snake_case pattern (review_start, review_log, review_complete). These events flow from executor to TUI. Run cargo build to verify no warnings.",
-      "durationSecs": 76,
+      "description": "In crates/baro-tui/src/main.rs, add a `--resume` boolean flag to the Cli struct using clap (`#[arg(long)]`). In crates/baro-tui/src/app.rs, add a `resume_mode: bool` field to App (default false) and a `is_resume: bool` field. No other changes needed yet. Ensure `cargo build` passes with zero warnings.",
+      "durationSecs": 100,
       "id": "S1",
       "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Add review event types to events.rs"
+      "title": "Add --resume CLI flag and resume_mode to App"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T19:56:19.062274+00:00",
-      "dependsOn": [
-        "S1"
-      ],
-      "description": "Add three new fields to the App struct in crates/baro-tui/src/app.rs: review_in_progress: bool (default false), review_level: usize (default 0), review_logs: Vec<String> (default empty vec). Initialize them in App::new(). Add event handling in handle_event for the three new event types: ReviewStart sets review_in_progress=true and review_level=level and clears review_logs, ReviewLog appends line to review_logs, ReviewComplete sets review_in_progress=false. Ensure cargo build passes with zero warnings.",
-      "durationSecs": 69,
+      "completedAt": "2026-03-23T20:09:42.714207+00:00",
+      "dependsOn": [],
+      "description": "In crates/baro-tui/src/git.rs, add a public async function `create_or_checkout_branch(cwd: &Path, branch_name: &str) -> Result<(), String>` that: 1) Runs `git checkout -b <branch_name>`. 2) If that fails (branch exists), runs `git checkout <branch_name>`. 3) After successful checkout, attempts `git push -u origin <branch_name>` (best-effort, log but don't fail if no remote). Returns Ok(()) on success or Err with message. Ensure cargo build passes with zero warnings.",
+      "durationSecs": 84,
       "id": "S2",
       "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
-      "title": "Add review tracking fields to App in app.rs"
+      "title": "Add git branch create/checkout helpers"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T19:59:11.175569+00:00",
+      "completedAt": "2026-03-23T20:11:42.482026+00:00",
       "dependsOn": [
         "S1",
         "S2"
       ],
-      "description": "In crates/baro-tui/src/executor.rs, implement the review agent that runs between DAG levels. Create an async function run_review_for_level that: 1) Takes the saved git hash, cwd, list of completed PrdStory refs for this level, tx sender, git_mutex, prd_path, and level index. 2) Emits ReviewStart { level }. 3) Runs 'git diff SAVED_HASH HEAD' to get all changes. 4) Collects acceptance criteria from all completed stories. 5) Spawns 'claude --dangerously-skip-permissions --output-format json -p' with a prompt containing the diff and acceptance criteria asking it to review and output JSON { passed: boolean, fixes: [{ title: string, description: string }] }. 6) Parses the JSON response (extract from Claude's JSON wrapper like the planner does). 7) If passed=true, emits ReviewComplete { level, passed: true, fix_count: 0 } and returns. 8) If passed=false, creates new PrdStory entries for each fix with ids like S{original}-fix{n}, executes them as regular stories (using execute_story), then re-reviews with a new diff from SAVED_HASH to HEAD. 9) Maximum 2 review-fix cycles per level - if after 2 rounds review still fails, emit a ReviewLog warning and ReviewComplete { level, passed: false, fix_count } and continue. In run_executor, before executing stories in each level, save the current commit hash with 'git rev-parse HEAD'. After all stories in a level complete, call run_review_for_level. Emit ReviewLog events for key steps so the TUI can display progress. Make sure cargo build passes with zero warnings.",
-      "durationSecs": 168,
+      "description": "In crates/baro-tui/src/main.rs, in the Screen::Review Enter key handler, after writing prd.json and before calling spawn_executor, call git::create_or_checkout_branch with the branch name formatted as `baro/<branchName>` from app.branch_name. Make this an async operation - you'll need to restructure slightly: use tokio::spawn to run the branch creation, then start execution. Alternatively, since we're already in an async context via the event loop, spawn a task that creates the branch then starts the executor. In crates/baro-tui/src/screens/execute.rs (or execute_dashboard.rs), update the header/title bar to display the current branch name from app.branch_name. The execute screen header should show something like 'BARO | project-name | baro/branch-name'. Store the full branch path (baro/<name>) in app. Ensure cargo build passes with zero warnings.",
+      "durationSecs": 81,
       "id": "S3",
       "passes": true,
       "priority": 3,
       "retries": 2,
       "tests": [],
-      "title": "Implement review agent logic in executor.rs"
+      "title": "Create branch on plan accept and show in TUI header"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T19:57:33.710996+00:00",
+      "completedAt": "2026-03-23T20:11:51.361277+00:00",
       "dependsOn": [
-        "S2"
+        "S1"
       ],
-      "description": "In crates/baro-tui/src/screens/execute_dashboard.rs, update the dashboard to show review status. In render_story_list: when app.review_in_progress is true, after the stories for the current level, add a ListItem showing 'Reviewing Level N...' in cyan with a spinner character (use app.tick_count to cycle through spinner chars like ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏). In render_logs: when app.review_in_progress is true and no active stories are running (active_ids is empty), show the review_logs from app.review_logs in the log panel instead of the 'Waiting for next story...' message. Use the same scrolling logic as story logs. Make sure cargo build passes with zero warnings.",
-      "durationSecs": 72,
+      "description": "In crates/baro-tui/src/screens/review.rs, modify the render function to handle resume mode (when app.is_resume is true). In resume mode: 1) Change header title to 'Resume Review' instead of 'Plan Review'. 2) For each story, show a checkmark icon (✓) and green color if the story was completed (you'll need to track this - add a `completed: bool` field to ReviewStory in app.rs). 3) Show incomplete stories with a pending icon (○). 4) Show counts: 'X done, Y remaining'. 5) Footer should say 'Enter:resume' instead of 'Enter:accept'. Ensure cargo build passes with zero warnings.",
+      "durationSecs": 91,
       "id": "S4",
       "passes": true,
       "priority": 4,
       "retries": 2,
       "tests": [],
-      "title": "Add review display to execute_dashboard.rs TUI"
+      "title": "Create resume review screen variant"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T20:00:25.240329+00:00",
+      "completedAt": "2026-03-23T20:13:40.971436+00:00",
       "dependsOn": [
         "S3",
         "S4"
       ],
-      "description": "Run cargo build on the entire project and fix any remaining warnings. Check that all new code compiles cleanly: unused imports, unused variables, dead code warnings, etc. Run cargo clippy if available to catch additional issues. Verify that all the new event types, app fields, executor review logic, and TUI display changes integrate correctly with zero warnings.",
-      "durationSecs": 71,
+      "description": "In crates/baro-tui/src/main.rs run_app function, add resume detection logic that runs BEFORE the existing goal check. The logic: 1) Check if prd.json exists in cwd. 2) If it exists, read and parse it as PrdFile. 3) Check if any stories have passes=false. 4) If --resume flag is set OR (prd.json exists with incomplete stories AND no goal was provided on CLI), enter resume mode. 5) In resume mode: set app.is_resume = true, populate app.project/branch_name/description from the prd, build ReviewStory list from ALL stories (with completed field set based on passes), call app.show_review() to go directly to the review screen (skipping welcome and planning). 6) In the Review screen Enter handler, when app.is_resume is true, read the existing prd.json instead of building a new one from review_stories (since it has the full data with acceptance/tests). Also checkout the baro/<branchName> branch before starting execution. 7) The DAG engine already filters incomplete stories, so execution will only run remaining ones. Ensure cargo build passes with zero warnings.",
+      "durationSecs": 102,
       "id": "S5",
       "passes": true,
       "priority": 5,
+      "retries": 2,
+      "tests": [],
+      "title": "Wire resume flow with auto-detection and --resume flag"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S5"
+      ],
+      "description": "Run `cargo build` in the project root and fix ANY warnings or errors. Check for: unused imports, unused variables, dead code warnings, missing fields in struct initialization, type mismatches. Fix all issues found. Run `cargo build` again to confirm zero warnings and zero errors. Also verify `cargo clippy` passes cleanly if clippy is available.",
+      "durationSecs": null,
+      "id": "S6",
+      "passes": false,
+      "priority": 6,
       "retries": 2,
       "tests": [],
       "title": "Final build verification and warning cleanup"
