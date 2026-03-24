@@ -131,6 +131,10 @@ pub struct App {
     pub review_level: usize,
     pub review_logs: Vec<String>,
 
+    // Finalize tracking
+    pub finalize_in_progress: bool,
+    pub pr_url: Option<String>,
+
     // Resume mode
     pub is_resume: bool,
 
@@ -172,6 +176,8 @@ impl App {
             review_in_progress: false,
             review_level: 0,
             review_logs: Vec::new(),
+            finalize_in_progress: false,
+            pr_url: None,
             is_resume: false,
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
@@ -407,6 +413,15 @@ impl App {
                     if passed { "passed" } else { "fixes needed" },
                     fix_count,
                 ));
+            }
+
+            BaroEvent::FinalizeStart => {
+                self.finalize_in_progress = true;
+            }
+
+            BaroEvent::FinalizeComplete { pr_url } => {
+                self.finalize_in_progress = false;
+                self.pr_url = pr_url;
             }
 
             BaroEvent::Done {
