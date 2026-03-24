@@ -576,22 +576,29 @@ async fn run_review_for_level(
             None => String::new(),
         };
 
-        // Build review prompt — focused on acceptance criteria only, not style/refactoring
+        // Build review prompt — acceptance criteria + code quality checks
         let prompt = format!(
-            "You are a focused code reviewer. Check ONLY whether the acceptance criteria are met by the diff.\n\n\
+            "You are a focused code reviewer. Check whether the acceptance criteria are met by the diff, \
+             and also check for obvious code quality problems.\n\n\
              ACCEPTANCE CRITERIA:\n{}\n\n\
              {}\
              GIT DIFF:\n```\n{}\n```\n\n\
              Rules:\n\
-             - ONLY check if the acceptance criteria are satisfied by the changes\n\
+             1. Check if the acceptance criteria are satisfied by the changes\n\
+             2. Check for obvious bugs visible in the diff: undefined variables, missing imports, \
+             broken function calls, type mismatches\n\
+             3. Check for leftover debug code: console.log/println!/fmt.Println debugging statements \
+             that should not be in production, commented-out code blocks\n\
+             4. If build output is provided above, check for build errors\n\
              - Do NOT suggest refactoring, style improvements, or architecture changes\n\
              - Do NOT flag missing tests unless tests are in the acceptance criteria\n\
              - Do NOT flag linting or formatting issues\n\
-             - If acceptance criteria are empty, pass by default\n\
-             - Be lenient: if the intent of the criteria is met, pass it\n\n\
+             - If acceptance criteria are empty, only check for bugs, debug code, and build errors\n\
+             - Be lenient: pass if code works correctly even if not perfectly clean\n\
+             - Only flag things that are actually broken or clearly wrong\n\n\
              Respond with ONLY valid JSON (no markdown fences):\n\
              {{\"passed\": boolean, \"fixes\": [{{\"title\": \"short title\", \"description\": \"what is wrong\"}}]}}\n\n\
-             If criteria are met, set passed=true and fixes=[].",
+             If criteria are met and no actual bugs/debug code/build errors are found, set passed=true and fixes=[].",
             criteria,
             build_section,
             if diff.len() > 30000 {
