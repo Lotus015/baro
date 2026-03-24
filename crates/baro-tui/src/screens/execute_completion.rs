@@ -12,7 +12,8 @@ use crate::theme;
 pub fn render_completion(f: &mut Frame, app: &App) {
     let area = f.area();
     let box_width = 50u16.min(area.width.saturating_sub(4));
-    let box_height = 15u16.min(area.height.saturating_sub(2));
+    let pr_extra: u16 = if app.pr_url.is_some() { 1 } else { 0 };
+    let box_height = (15u16 + pr_extra).min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(box_width)) / 2;
     let y = (area.height.saturating_sub(box_height)) / 2;
     let popup_area = Rect::new(x, y, box_width, box_height);
@@ -109,9 +110,17 @@ pub fn render_completion(f: &mut Frame, app: &App) {
                 ),
             ),
         ]),
-        Line::from(""),
-        Line::from(Span::styled("q quit", Style::default().fg(theme::MUTED))),
     ];
+
+    if let Some(ref url) = app.pr_url {
+        lines.push(Line::from(vec![
+            Span::styled("  PR: ", Style::default().fg(theme::MUTED)),
+            Span::styled(url.clone(), Style::default().fg(theme::ACCENT)),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("q quit", Style::default().fg(theme::MUTED))));
 
     let block = Block::default()
         .borders(Borders::ALL)

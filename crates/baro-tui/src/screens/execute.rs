@@ -153,7 +153,9 @@ fn render_progress(f: &mut Frame, app: &App, area: Rect) {
 // --- Shared: Footer ---
 
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
-    let msg = if app.done {
+    let msg = if app.finalize_in_progress {
+        " Finalizing...".to_string()
+    } else if app.done {
         let stats = app.final_stats.as_ref();
         let completed = stats.map(|s| s.stories_completed).unwrap_or(0);
         let skipped = stats.map(|s| s.stories_skipped).unwrap_or(0);
