@@ -560,10 +560,27 @@ async fn run_review_for_level(
             criteria.push('\n');
         }
 
+        // Run build to capture output for reviewer context
+        let build_section = match detect_project_and_build(cwd).await {
+            Some(output) => {
+                let truncated = if output.len() > 5000 {
+                    &output[..5000]
+                } else {
+                    &output
+                };
+                format!(
+                    "\nBUILD OUTPUT (from running the project build command):\n{}\n\n",
+                    truncated
+                )
+            }
+            None => String::new(),
+        };
+
         // Build review prompt — focused on acceptance criteria only, not style/refactoring
         let prompt = format!(
             "You are a focused code reviewer. Check ONLY whether the acceptance criteria are met by the diff.\n\n\
              ACCEPTANCE CRITERIA:\n{}\n\n\
+             {}\
              GIT DIFF:\n```\n{}\n```\n\n\
              Rules:\n\
              - ONLY check if the acceptance criteria are satisfied by the changes\n\
@@ -576,6 +593,7 @@ async fn run_review_for_level(
              {{\"passed\": boolean, \"fixes\": [{{\"title\": \"short title\", \"description\": \"what is wrong\"}}]}}\n\n\
              If criteria are met, set passed=true and fixes=[].",
             criteria,
+            build_section,
             if diff.len() > 30000 {
                 &diff[..30000]
             } else {

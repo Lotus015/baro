@@ -1,92 +1,62 @@
 {
-  "branchName": "feat/branch-per-execution-and-resume",
-  "description": "Add branch-per-execution on plan accept and resume interrupted execution from prd.json",
-  "project": "baro-branch-and-resume",
+  "branchName": "feat/review-code-quality-checks",
+  "description": "Enhance review agent with build detection, bug detection, and debug code checks",
+  "project": "baro-review-quality",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T20:09:57.621038+00:00",
+      "completedAt": "2026-03-24T07:06:27.352482+00:00",
       "dependsOn": [],
-      "description": "In crates/baro-tui/src/main.rs, add a `--resume` boolean flag to the Cli struct using clap (`#[arg(long)]`). In crates/baro-tui/src/app.rs, add a `resume_mode: bool` field to App (default false) and a `is_resume: bool` field. No other changes needed yet. Ensure `cargo build` passes with zero warnings.",
-      "durationSecs": 100,
+      "description": "In executor.rs, add a new async function `detect_project_and_build(cwd: &Path) -> Option<String>` that detects the project type by checking for build files (Cargo.toml, package.json, go.mod, pyproject.toml, Makefile) in the given directory, runs the appropriate build command (cargo build 2>&1, npm run build 2>&1, go build ./... 2>&1, python -m py_compile on .py files, make 2>&1), captures the combined stdout+stderr output, and returns Some(output) if the build command produced any output (especially errors/warnings), or None if no build system was detected. The function should check files in priority order and use the first match. Use tokio::process::Command for async execution. Make sure this function is NOT public - it's only used internally by the review flow.",
+      "durationSecs": 53,
       "id": "S1",
       "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Add --resume CLI flag and resume_mode to App"
+      "title": "Add detect_project_and_build function"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-23T20:09:42.714207+00:00",
-      "dependsOn": [],
-      "description": "In crates/baro-tui/src/git.rs, add a public async function `create_or_checkout_branch(cwd: &Path, branch_name: &str) -> Result<(), String>` that: 1) Runs `git checkout -b <branch_name>`. 2) If that fails (branch exists), runs `git checkout <branch_name>`. 3) After successful checkout, attempts `git push -u origin <branch_name>` (best-effort, log but don't fail if no remote). Returns Ok(()) on success or Err with message. Ensure cargo build passes with zero warnings.",
-      "durationSecs": 84,
-      "id": "S2",
-      "passes": true,
-      "priority": 2,
-      "retries": 2,
-      "tests": [],
-      "title": "Add git branch create/checkout helpers"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-23T20:11:42.482026+00:00",
-      "dependsOn": [
-        "S1",
-        "S2"
-      ],
-      "description": "In crates/baro-tui/src/main.rs, in the Screen::Review Enter key handler, after writing prd.json and before calling spawn_executor, call git::create_or_checkout_branch with the branch name formatted as `baro/<branchName>` from app.branch_name. Make this an async operation - you'll need to restructure slightly: use tokio::spawn to run the branch creation, then start execution. Alternatively, since we're already in an async context via the event loop, spawn a task that creates the branch then starts the executor. In crates/baro-tui/src/screens/execute.rs (or execute_dashboard.rs), update the header/title bar to display the current branch name from app.branch_name. The execute screen header should show something like 'BARO | project-name | baro/branch-name'. Store the full branch path (baro/<name>) in app. Ensure cargo build passes with zero warnings.",
-      "durationSecs": 81,
-      "id": "S3",
-      "passes": true,
-      "priority": 3,
-      "retries": 2,
-      "tests": [],
-      "title": "Create branch on plan accept and show in TUI header"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-23T20:11:51.361277+00:00",
+      "completedAt": null,
       "dependsOn": [
         "S1"
       ],
-      "description": "In crates/baro-tui/src/screens/review.rs, modify the render function to handle resume mode (when app.is_resume is true). In resume mode: 1) Change header title to 'Resume Review' instead of 'Plan Review'. 2) For each story, show a checkmark icon (✓) and green color if the story was completed (you'll need to track this - add a `completed: bool` field to ReviewStory in app.rs). 3) Show incomplete stories with a pending icon (○). 4) Show counts: 'X done, Y remaining'. 5) Footer should say 'Enter:resume' instead of 'Enter:accept'. Ensure cargo build passes with zero warnings.",
-      "durationSecs": 91,
+      "description": "In executor.rs, modify run_review_for_level to call detect_project_and_build(cwd) before spawning the review Claude process. If the function returns Some(build_output), include a BUILD OUTPUT section in the review prompt between the acceptance criteria and the git diff. The section should say 'BUILD OUTPUT (from running the project build command):' followed by the build output truncated to 5000 chars max. If detect_project_and_build returns None, omit the section entirely. This gives the reviewer context about build failures.",
+      "durationSecs": null,
+      "id": "S2",
+      "passes": false,
+      "priority": 2,
+      "retries": 2,
+      "tests": [],
+      "title": "Integrate build output into review prompt"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S2"
+      ],
+      "description": "In executor.rs, update the review prompt string in run_review_for_level to add additional checks beyond acceptance criteria. The updated prompt should instruct the reviewer to ALSO check for: 1) Obvious bugs visible in the diff - undefined variables, missing imports, broken function calls, type mismatches. 2) Leftover debug code - console.log/println!/fmt.Println debugging statements that shouldn't be in production, commented-out code blocks. 3) Build errors if build output is provided. Keep the existing rules: do NOT suggest refactoring, style improvements, or architecture changes. Do NOT flag linting or formatting. Be lenient - pass if code works correctly even if not perfectly clean. Only flag things that are actually broken or clearly wrong. The review should still pass if acceptance criteria are met and no actual bugs/debug code/build errors are found.",
+      "durationSecs": null,
+      "id": "S3",
+      "passes": false,
+      "priority": 3,
+      "retries": 2,
+      "tests": [],
+      "title": "Expand review prompt with code quality checks"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S3"
+      ],
+      "description": "Run cargo build and cargo clippy on the entire workspace. Fix any warnings (unused imports, unused variables, dead code, clippy lints) that exist in the codebase. Ensure cargo build completes with zero warnings. Check that the review prompt reads naturally and all pieces (build output section, bug checks, debug code checks, acceptance criteria) fit together coherently in the prompt string. Do NOT refactor or restructure existing code - only fix warnings and ensure clean compilation.",
+      "durationSecs": null,
       "id": "S4",
-      "passes": true,
+      "passes": false,
       "priority": 4,
-      "retries": 2,
-      "tests": [],
-      "title": "Create resume review screen variant"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-23T20:13:40.971436+00:00",
-      "dependsOn": [
-        "S3",
-        "S4"
-      ],
-      "description": "In crates/baro-tui/src/main.rs run_app function, add resume detection logic that runs BEFORE the existing goal check. The logic: 1) Check if prd.json exists in cwd. 2) If it exists, read and parse it as PrdFile. 3) Check if any stories have passes=false. 4) If --resume flag is set OR (prd.json exists with incomplete stories AND no goal was provided on CLI), enter resume mode. 5) In resume mode: set app.is_resume = true, populate app.project/branch_name/description from the prd, build ReviewStory list from ALL stories (with completed field set based on passes), call app.show_review() to go directly to the review screen (skipping welcome and planning). 6) In the Review screen Enter handler, when app.is_resume is true, read the existing prd.json instead of building a new one from review_stories (since it has the full data with acceptance/tests). Also checkout the baro/<branchName> branch before starting execution. 7) The DAG engine already filters incomplete stories, so execution will only run remaining ones. Ensure cargo build passes with zero warnings.",
-      "durationSecs": 102,
-      "id": "S5",
-      "passes": true,
-      "priority": 5,
-      "retries": 2,
-      "tests": [],
-      "title": "Wire resume flow with auto-detection and --resume flag"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-23T20:14:31.428797+00:00",
-      "dependsOn": [
-        "S5"
-      ],
-      "description": "Run `cargo build` in the project root and fix ANY warnings or errors. Check for: unused imports, unused variables, dead code warnings, missing fields in struct initialization, type mismatches. Fix all issues found. Run `cargo build` again to confirm zero warnings and zero errors. Also verify `cargo clippy` passes cleanly if clippy is available.",
-      "durationSecs": 25,
-      "id": "S6",
-      "passes": true,
-      "priority": 6,
       "retries": 2,
       "tests": [],
       "title": "Final build verification and warning cleanup"
