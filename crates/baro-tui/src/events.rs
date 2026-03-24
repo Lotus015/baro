@@ -101,6 +101,14 @@ pub enum BaroEvent {
         fix_count: u32,
     },
 
+    #[serde(rename = "finalize_start")]
+    FinalizeStart,
+
+    #[serde(rename = "finalize_complete")]
+    FinalizeComplete {
+        pr_url: Option<String>,
+    },
+
     #[serde(rename = "done")]
     Done {
         total_time_secs: u64,
