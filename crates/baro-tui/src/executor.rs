@@ -354,6 +354,104 @@ fn extract_json(text: &str) -> String {
     text.trim().to_string()
 }
 
+// ─── Build detection & execution ────────────────────────────
+
+async fn detect_project_and_build(cwd: &Path) -> Option<String> {
+    let build_systems: &[(&str, &[&str])] = &[
+        ("Cargo.toml", &["cargo", "build"]),
+        ("package.json", &["npm", "run", "build"]),
+        ("go.mod", &["go", "build", "./..."]),
+        ("pyproject.toml", &[]),
+        ("Makefile", &["make"]),
+    ];
+
+    for (file, cmd) in build_systems {
+        if !cwd.join(file).exists() {
+            continue;
+        }
+
+        // Python: compile all .py files
+        if *file == "pyproject.toml" {
+            let mut py_files = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(cwd) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("py") {
+                        py_files.push(path);
+                    }
+                }
+            }
+            // Also check src/ directory
+            let src_dir = cwd.join("src");
+            if src_dir.is_dir() {
+                fn collect_py_files(dir: &Path, files: &mut Vec<PathBuf>) {
+                    if let Ok(entries) = std::fs::read_dir(dir) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_dir() {
+                                collect_py_files(&path, files);
+                            } else if path.extension().and_then(|e| e.to_str()) == Some("py") {
+                                files.push(path);
+                            }
+                        }
+                    }
+                }
+                collect_py_files(&src_dir, &mut py_files);
+            }
+
+            if py_files.is_empty() {
+                return None;
+            }
+
+            let py_args: Vec<String> = std::iter::once("-m".to_string())
+                .chain(std::iter::once("py_compile".to_string()))
+                .chain(py_files.iter().map(|p| p.to_string_lossy().to_string()))
+                .collect();
+
+            let output = Command::new("python")
+                .args(&py_args)
+                .current_dir(cwd)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await
+                .ok()?;
+
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if combined.trim().is_empty() {
+                return None;
+            }
+            return Some(combined);
+        }
+
+        // All other build systems
+        let output = Command::new(cmd[0])
+            .args(&cmd[1..])
+            .current_dir(cwd)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .ok()?;
+
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if combined.trim().is_empty() {
+            return None;
+        }
+        return Some(combined);
+    }
+
+    None
+}
+
 // ─── Review agent ───────────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize)]
