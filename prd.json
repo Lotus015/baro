@@ -1,81 +1,33 @@
 {
-  "branchName": "feat/finalize-build-and-pr",
-  "description": "Add a finalize phase after all stories complete: run build, create GitHub PR, show PR URL in TUI",
-  "project": "baro-finalize-step",
+  "branchName": "feat/time-saved-metric",
+  "description": "Add time saved metric showing parallel execution speedup in stats panel and completion overlay",
+  "project": "time-saved-metric",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-24T07:39:25.863652+00:00",
+      "completedAt": null,
       "dependsOn": [],
-      "description": "In crates/baro-tui/src/events.rs, add two new variants to the BaroEvent enum: FinalizeStart (no fields) and FinalizeComplete { pr_url: Option<String> }. Use serde rename 'finalize_start' and 'finalize_complete'. Keep the existing Deserialize/Clone derives working.",
-      "durationSecs": 26,
+      "description": "In execute_stats.rs, calculate sequential_time as the sum of all completed story duration_secs values. Get wall_time from app.elapsed_secs() (or app.total_time_secs if final_stats is present). Compute saved_time = sequential_time - wall_time and multiplier = sequential_time / wall_time. Add a third Line to the summary_lines vec in render_stats_full() showing 'Saved: M:SS (X.Xx faster)' when there are 2+ completed stories and multiplier > 1.0, otherwise show '1.0x' without saved time. Use theme::SUCCESS for the saved time and theme::ACCENT for the multiplier. Ensure cargo build passes with zero warnings.",
+      "durationSecs": null,
       "id": "S1",
-      "passes": true,
+      "passes": false,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Add FinalizeStart and FinalizeComplete events"
+      "title": "Add time saved calculation and display in Stats panel"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-24T07:41:23.699643+00:00",
-      "dependsOn": [
-        "S1"
-      ],
-      "description": "In crates/baro-tui/src/app.rs: 1) Add two fields to the App struct: finalize_in_progress: bool (default false) and pr_url: Option<String> (default None). 2) In handle_event(), add match arms for FinalizeStart (set finalize_in_progress = true) and FinalizeComplete { pr_url } (set finalize_in_progress = false, store pr_url). Initialize both fields in App::new().",
-      "durationSecs": 28,
+      "completedAt": "2026-03-24T21:17:06.351513+00:00",
+      "dependsOn": [],
+      "description": "In execute_completion.rs, calculate sequential_time as the sum of all completed story duration_secs values. Use total_time (from app.total_time_secs) as wall_time. Compute saved_secs = sequential_time - wall_time and multiplier = sequential_time as f64 / wall_time as f64. Add a prominent line after 'Total time' showing 'Time saved: M:SS with parallel execution (X.Xx speedup)' when stories > 1 and multiplier > 1.0, otherwise show 'Parallelism: 1.0x'. Increase box_height by 1 to accommodate. Use theme::SUCCESS with BOLD for the saved time text. Ensure cargo build passes with zero warnings.",
+      "durationSecs": 62,
       "id": "S2",
       "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
-      "title": "Handle finalize events in App"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-24T07:42:10.428565+00:00",
-      "dependsOn": [
-        "S1"
-      ],
-      "description": "In crates/baro-tui/src/executor.rs, in the run_executor function, AFTER the Done event is sent (after line ~1023), add a finalize phase: 1) Send FinalizeStart event. 2) Run detect_project_and_build(&cwd).await - if it returns Some(output) and the output contains 'error', log it as a warning but continue. 3) Try to create a GitHub PR: first check if 'gh' CLI is available by running 'gh --version'. If available, get the current branch name using crate::git::get_current_branch. Build a PR body string containing: the prd.project name, prd.description, a list of completed stories (iterate prd.user_stories where passes==true, show id, title, duration_secs), and stats (total_files_created, total_files_modified, total_time_secs, completed count, skipped count). Then run: gh pr create --title \"<prd.project>\" --body \"<body>\" --base main --head <branch>. Capture stdout to extract the PR URL (gh prints the URL on success). If gh is not installed, not a github repo, or PR creation fails for any reason, log a warning and set pr_url to None. 4) Send FinalizeComplete { pr_url } event.",
-      "durationSecs": 76,
-      "id": "S3",
-      "passes": true,
-      "priority": 3,
-      "retries": 2,
-      "tests": [],
-      "title": "Add finalize phase to executor run_executor"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-24T07:43:16.508081+00:00",
-      "dependsOn": [
-        "S2"
-      ],
-      "description": "Two UI changes: 1) In crates/baro-tui/src/screens/execute.rs render_footer function: add a condition - if app.finalize_in_progress is true (and app.done is also true since finalize runs after Done), show 'Finalizing...' in the footer message instead of the normal done message. The else-if priority should be: finalize_in_progress first, then done, then default. 2) In crates/baro-tui/src/screens/execute_completion.rs render_completion function: after the 'Pushed' line and before the empty line + 'q quit' line, if app.pr_url is Some(url), add a new Line showing 'PR: <url>' styled with theme::ACCENT color. Keep the box_height the same or increase by 1 if pr_url is present.",
-      "durationSecs": 44,
-      "id": "S4",
-      "passes": true,
-      "priority": 4,
-      "retries": 2,
-      "tests": [],
-      "title": "Show Finalizing in footer and PR URL in completion overlay"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-24T07:44:39.137201+00:00",
-      "dependsOn": [
-        "S3",
-        "S4"
-      ],
-      "description": "Run cargo build on the entire workspace and fix any warnings. Run cargo clippy if available and fix any lints. Ensure all new code compiles cleanly with zero warnings. Check that all the new event variants, app fields, executor finalize logic, and UI changes integrate correctly by doing a full cargo build.",
-      "durationSecs": 33,
-      "id": "S5",
-      "passes": true,
-      "priority": 5,
-      "retries": 2,
-      "tests": [],
-      "title": "Final build verification and warning cleanup"
+      "title": "Add time saved display in completion overlay"
     }
   ]
 }

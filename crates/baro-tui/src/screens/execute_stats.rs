@@ -11,7 +11,7 @@ use crate::theme;
 
 pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     let has_bar_data = app.stories.iter().any(|s| s.duration_secs.is_some());
-    let mut constraints = vec![Constraint::Length(6)]; // Summary
+    let mut constraints = vec![Constraint::Length(7)]; // Summary
     if has_bar_data {
         constraints.push(Constraint::Length(10)); // Bar chart
     }
@@ -48,8 +48,15 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     let total_files_modified: u32 = app.stories.iter().map(|s| s.files_modified).sum();
     let final_stats = app.final_stats.as_ref();
 
+    // -- Time saved calculation --
+    let sequential_time: u64 = completed_stories
+        .iter()
+        .filter_map(|s| s.duration_secs)
+        .sum();
+    let wall_time = app.elapsed_secs();
+
     // -- Summary --
-    let summary_lines = vec![
+    let mut summary_lines = vec![
         Line::from(vec![
             Span::styled("  Stories: ", Style::default().fg(theme::MUTED)),
             Span::styled(
@@ -138,6 +145,44 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
             ),
         ]),
     ];
+
+    // Third line: time saved
+    let completed_count = completed_stories.len();
+    let multiplier = if wall_time > 0 {
+        sequential_time as f64 / wall_time as f64
+    } else {
+        1.0
+    };
+    if completed_count >= 2 && multiplier > 1.0 {
+        let saved_time = sequential_time.saturating_sub(wall_time);
+        summary_lines.push(Line::from(vec![
+            Span::styled("  Saved: ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{}:{:02}", saved_time / 60, saved_time % 60),
+                Style::default()
+                    .fg(theme::SUCCESS)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" (", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{:.1}x", multiplier),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" faster)", Style::default().fg(theme::MUTED)),
+        ]));
+    } else {
+        summary_lines.push(Line::from(vec![
+            Span::styled("  Saved: ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                "1.0x",
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
 
     let summary = Paragraph::new(summary_lines).block(
         Block::default()
