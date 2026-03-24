@@ -5,12 +5,12 @@
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-24T21:17:45.816230+00:00",
       "dependsOn": [],
       "description": "In execute_stats.rs, calculate sequential_time as the sum of all completed story duration_secs values. Get wall_time from app.elapsed_secs() (or app.total_time_secs if final_stats is present). Compute saved_time = sequential_time - wall_time and multiplier = sequential_time / wall_time. Add a third Line to the summary_lines vec in render_stats_full() showing 'Saved: M:SS (X.Xx faster)' when there are 2+ completed stories and multiplier > 1.0, otherwise show '1.0x' without saved time. Use theme::SUCCESS for the saved time and theme::ACCENT for the multiplier. Ensure cargo build passes with zero warnings.",
-      "durationSecs": null,
+      "durationSecs": 101,
       "id": "S1",
-      "passes": false,
+      "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
