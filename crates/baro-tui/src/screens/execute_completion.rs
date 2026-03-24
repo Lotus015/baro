@@ -31,7 +31,7 @@ pub fn render_completion(f: &mut Frame, app: &App) {
         .map(|s| s.files_modified)
         .unwrap_or_else(|| app.stories.iter().map(|s| s.files_modified).sum());
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(""),
         Line::from(Span::styled(
             "ALL STORIES COMPLETE",
