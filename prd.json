@@ -33,14 +33,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-24T07:42:10.428565+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "In crates/baro-tui/src/executor.rs, in the run_executor function, AFTER the Done event is sent (after line ~1023), add a finalize phase: 1) Send FinalizeStart event. 2) Run detect_project_and_build(&cwd).await - if it returns Some(output) and the output contains 'error', log it as a warning but continue. 3) Try to create a GitHub PR: first check if 'gh' CLI is available by running 'gh --version'. If available, get the current branch name using crate::git::get_current_branch. Build a PR body string containing: the prd.project name, prd.description, a list of completed stories (iterate prd.user_stories where passes==true, show id, title, duration_secs), and stats (total_files_created, total_files_modified, total_time_secs, completed count, skipped count). Then run: gh pr create --title \"<prd.project>\" --body \"<body>\" --base main --head <branch>. Capture stdout to extract the PR URL (gh prints the URL on success). If gh is not installed, not a github repo, or PR creation fails for any reason, log a warning and set pr_url to None. 4) Send FinalizeComplete { pr_url } event.",
-      "durationSecs": null,
+      "durationSecs": 76,
       "id": "S3",
-      "passes": false,
+      "passes": true,
       "priority": 3,
       "retries": 2,
       "tests": [],
@@ -48,14 +48,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-24T07:43:16.508081+00:00",
       "dependsOn": [
         "S2"
       ],
       "description": "Two UI changes: 1) In crates/baro-tui/src/screens/execute.rs render_footer function: add a condition - if app.finalize_in_progress is true (and app.done is also true since finalize runs after Done), show 'Finalizing...' in the footer message instead of the normal done message. The else-if priority should be: finalize_in_progress first, then done, then default. 2) In crates/baro-tui/src/screens/execute_completion.rs render_completion function: after the 'Pushed' line and before the empty line + 'q quit' line, if app.pr_url is Some(url), add a new Line showing 'PR: <url>' styled with theme::ACCENT color. Keep the box_height the same or increase by 1 if pr_url is present.",
-      "durationSecs": null,
+      "durationSecs": 44,
       "id": "S4",
-      "passes": false,
+      "passes": true,
       "priority": 4,
       "retries": 2,
       "tests": [],
