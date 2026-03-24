@@ -1,62 +1,78 @@
 {
-  "branchName": "feat/review-code-quality-checks",
-  "description": "Enhance review agent with build detection, bug detection, and debug code checks",
-  "project": "baro-review-quality",
+  "branchName": "feat/finalize-build-and-pr",
+  "description": "Add a finalize phase after all stories complete: run build, create GitHub PR, show PR URL in TUI",
+  "project": "baro-finalize-step",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-24T07:20:08.499782+00:00",
+      "completedAt": "2026-03-24T07:39:25.863652+00:00",
       "dependsOn": [],
-      "description": "In executor.rs, add a new async function `detect_project_and_build(cwd: &Path) -> Option<String>` that detects the project type by checking for build files (Cargo.toml, package.json, go.mod, pyproject.toml, Makefile) in the given directory, runs the appropriate build command (cargo build 2>&1, npm run build 2>&1, go build ./... 2>&1, python -m py_compile on .py files, make 2>&1), captures the combined stdout+stderr output, and returns Some(output) if the build command produced any output (especially errors/warnings), or None if no build system was detected. The function should check files in priority order and use the first match. Use tokio::process::Command for async execution. Make sure this function is NOT public - it's only used internally by the review flow.",
-      "durationSecs": 24,
+      "description": "In crates/baro-tui/src/events.rs, add two new variants to the BaroEvent enum: FinalizeStart (no fields) and FinalizeComplete { pr_url: Option<String> }. Use serde rename 'finalize_start' and 'finalize_complete'. Keep the existing Deserialize/Clone derives working.",
+      "durationSecs": 26,
       "id": "S1",
       "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Add detect_project_and_build function"
+      "title": "Add FinalizeStart and FinalizeComplete events"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-24T07:20:47.177551+00:00",
+      "completedAt": "2026-03-24T07:41:23.699643+00:00",
       "dependsOn": [
         "S1"
       ],
-      "description": "In executor.rs, modify run_review_for_level to call detect_project_and_build(cwd) before spawning the review Claude process. If the function returns Some(build_output), include a BUILD OUTPUT section in the review prompt between the acceptance criteria and the git diff. The section should say 'BUILD OUTPUT (from running the project build command):' followed by the build output truncated to 5000 chars max. If detect_project_and_build returns None, omit the section entirely. This gives the reviewer context about build failures.",
-      "durationSecs": 36,
+      "description": "In crates/baro-tui/src/app.rs: 1) Add two fields to the App struct: finalize_in_progress: bool (default false) and pr_url: Option<String> (default None). 2) In handle_event(), add match arms for FinalizeStart (set finalize_in_progress = true) and FinalizeComplete { pr_url } (set finalize_in_progress = false, store pr_url). Initialize both fields in App::new().",
+      "durationSecs": 28,
       "id": "S2",
       "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
-      "title": "Integrate build output into review prompt"
+      "title": "Handle finalize events in App"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-24T07:21:41.025838+00:00",
+      "completedAt": null,
       "dependsOn": [
-        "S2"
+        "S1"
       ],
-      "description": "In executor.rs, update the review prompt string in run_review_for_level to add additional checks beyond acceptance criteria. The updated prompt should instruct the reviewer to ALSO check for: 1) Obvious bugs visible in the diff - undefined variables, missing imports, broken function calls, type mismatches. 2) Leftover debug code - console.log/println!/fmt.Println debugging statements that shouldn't be in production, commented-out code blocks. 3) Build errors if build output is provided. Keep the existing rules: do NOT suggest refactoring, style improvements, or architecture changes. Do NOT flag linting or formatting. Be lenient - pass if code works correctly even if not perfectly clean. Only flag things that are actually broken or clearly wrong. The review should still pass if acceptance criteria are met and no actual bugs/debug code/build errors are found.",
-      "durationSecs": 51,
+      "description": "In crates/baro-tui/src/executor.rs, in the run_executor function, AFTER the Done event is sent (after line ~1023), add a finalize phase: 1) Send FinalizeStart event. 2) Run detect_project_and_build(&cwd).await - if it returns Some(output) and the output contains 'error', log it as a warning but continue. 3) Try to create a GitHub PR: first check if 'gh' CLI is available by running 'gh --version'. If available, get the current branch name using crate::git::get_current_branch. Build a PR body string containing: the prd.project name, prd.description, a list of completed stories (iterate prd.user_stories where passes==true, show id, title, duration_secs), and stats (total_files_created, total_files_modified, total_time_secs, completed count, skipped count). Then run: gh pr create --title \"<prd.project>\" --body \"<body>\" --base main --head <branch>. Capture stdout to extract the PR URL (gh prints the URL on success). If gh is not installed, not a github repo, or PR creation fails for any reason, log a warning and set pr_url to None. 4) Send FinalizeComplete { pr_url } event.",
+      "durationSecs": null,
       "id": "S3",
-      "passes": true,
+      "passes": false,
       "priority": 3,
       "retries": 2,
       "tests": [],
-      "title": "Expand review prompt with code quality checks"
+      "title": "Add finalize phase to executor run_executor"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-24T07:23:23.140666+00:00",
+      "completedAt": null,
       "dependsOn": [
-        "S3"
+        "S2"
       ],
-      "description": "Run cargo build and cargo clippy on the entire workspace. Fix any warnings (unused imports, unused variables, dead code, clippy lints) that exist in the codebase. Ensure cargo build completes with zero warnings. Check that the review prompt reads naturally and all pieces (build output section, bug checks, debug code checks, acceptance criteria) fit together coherently in the prompt string. Do NOT refactor or restructure existing code - only fix warnings and ensure clean compilation.",
-      "durationSecs": 94,
+      "description": "Two UI changes: 1) In crates/baro-tui/src/screens/execute.rs render_footer function: add a condition - if app.finalize_in_progress is true (and app.done is also true since finalize runs after Done), show 'Finalizing...' in the footer message instead of the normal done message. The else-if priority should be: finalize_in_progress first, then done, then default. 2) In crates/baro-tui/src/screens/execute_completion.rs render_completion function: after the 'Pushed' line and before the empty line + 'q quit' line, if app.pr_url is Some(url), add a new Line showing 'PR: <url>' styled with theme::ACCENT color. Keep the box_height the same or increase by 1 if pr_url is present.",
+      "durationSecs": null,
       "id": "S4",
-      "passes": true,
+      "passes": false,
       "priority": 4,
+      "retries": 2,
+      "tests": [],
+      "title": "Show Finalizing in footer and PR URL in completion overlay"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S3",
+        "S4"
+      ],
+      "description": "Run cargo build on the entire workspace and fix any warnings. Run cargo clippy if available and fix any lints. Ensure all new code compiles cleanly with zero warnings. Check that all the new event variants, app fields, executor finalize logic, and UI changes integrate correctly by doing a full cargo build.",
+      "durationSecs": null,
+      "id": "S5",
+      "passes": false,
+      "priority": 5,
       "retries": 2,
       "tests": [],
       "title": "Final build verification and warning cleanup"

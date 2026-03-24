@@ -1021,6 +1021,109 @@ pub async fn run_executor(
             },
         })
         .await;
+
+    // ─── Finalize phase ─────────────────────────────────────────
+    let _ = tx.send(BaroEvent::FinalizeStart).await;
+
+    // Step 1: Run build detection
+    if let Some(output) = detect_project_and_build(&cwd).await {
+        if output.to_lowercase().contains("error") {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("Build warning: {}", output),
+                })
+                .await;
+        }
+    }
+
+    // Step 2: Try to create a GitHub PR
+    let pr_url = async {
+        // Check if gh CLI is available
+        let gh_check = Command::new("gh")
+            .arg("--version")
+            .output()
+            .await
+            .ok()?;
+        if !gh_check.status.success() {
+            return None;
+        }
+
+        // Get current branch
+        let branch = crate::git::get_current_branch(&cwd).await.ok()?;
+
+        // Re-read prd.json from disk for up-to-date completion status
+        let prd_data = tokio::fs::read_to_string(cwd.join("prd.json"))
+            .await
+            .ok()?;
+        let current_prd: PrdFile = serde_json::from_str(&prd_data).ok()?;
+
+        // Build PR body
+        let mut body = format!(
+            "## {}\n\n{}\n\n### Completed Stories\n\n",
+            current_prd.project, current_prd.description
+        );
+        for story in current_prd.user_stories.iter().filter(|s| s.passes) {
+            let duration = story
+                .duration_secs
+                .map(|d| format!(" ({}s)", d))
+                .unwrap_or_default();
+            body.push_str(&format!(
+                "- **{}**: {}{}\n",
+                story.id, story.title, duration
+            ));
+        }
+        body.push_str(&format!(
+            "\n### Stats\n\n\
+             - Files created: {}\n\
+             - Files modified: {}\n\
+             - Total time: {}s\n\
+             - Completed: {}\n\
+             - Skipped: {}\n",
+            total_files_created, total_files_modified, total_time_secs, completed, skipped
+        ));
+
+        let pr_output = Command::new("gh")
+            .args([
+                "pr",
+                "create",
+                "--title",
+                &current_prd.project,
+                "--body",
+                &body,
+                "--base",
+                "main",
+                "--head",
+                &branch,
+            ])
+            .current_dir(&cwd)
+            .output()
+            .await
+            .ok()?;
+
+        if pr_output.status.success() {
+            let stdout = String::from_utf8_lossy(&pr_output.stdout)
+                .trim()
+                .to_string();
+            if stdout.is_empty() {
+                None
+            } else {
+                Some(stdout)
+            }
+        } else {
+            let stderr = String::from_utf8_lossy(&pr_output.stderr);
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("PR creation failed: {}", stderr),
+                })
+                .await;
+            None
+        }
+    }
+    .await;
+
+    let _ = tx.send(BaroEvent::FinalizeComplete { pr_url }).await;
 }
 
 // ─── Helper: Build PrdFile from ReviewStories ───────────────
