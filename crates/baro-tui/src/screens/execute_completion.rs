@@ -13,7 +13,7 @@ pub fn render_completion(f: &mut Frame, app: &App) {
     let area = f.area();
     let box_width = 50u16.min(area.width.saturating_sub(4));
     let pr_extra: u16 = if app.pr_url.is_some() { 1 } else { 0 };
-    let box_height = (15u16 + pr_extra).min(area.height.saturating_sub(2));
+    let box_height = (16u16 + pr_extra).min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(box_width)) / 2;
     let y = (area.height.saturating_sub(box_height)) / 2;
     let popup_area = Rect::new(x, y, box_width, box_height);
@@ -30,6 +30,19 @@ pub fn render_completion(f: &mut Frame, app: &App) {
     let files_modified: u32 = stats
         .map(|s| s.files_modified)
         .unwrap_or_else(|| app.stories.iter().map(|s| s.files_modified).sum());
+
+    let sequential_time: u64 = app
+        .stories
+        .iter()
+        .filter_map(|s| s.duration_secs)
+        .sum();
+    let wall_time = app.total_time_secs;
+    let saved_secs = sequential_time.saturating_sub(wall_time);
+    let multiplier = if wall_time > 0 {
+        sequential_time as f64 / wall_time as f64
+    } else {
+        1.0
+    };
 
     let mut lines = vec![
         Line::from(""),
@@ -77,6 +90,24 @@ pub fn render_completion(f: &mut Frame, app: &App) {
                     .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Time saved:     ", Style::default().fg(theme::MUTED)),
+            if app.total > 1 && multiplier > 1.0 {
+                Span::styled(
+                    format!(
+                        "{}:{:02} with parallel execution ({:.1}x speedup)",
+                        saved_secs / 60,
+                        saved_secs % 60,
+                        multiplier
+                    ),
+                    Style::default()
+                        .fg(theme::SUCCESS)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled("Parallelism: 1.0x", Style::default().fg(theme::MUTED))
+            },
         ]),
         Line::from(vec![
             Span::styled("  Files created:  ", Style::default().fg(theme::MUTED)),
