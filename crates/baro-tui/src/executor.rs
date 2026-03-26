@@ -883,10 +883,18 @@ async fn run_review_for_level(
             match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, timeout_secs, fix_model)
                 .await
             {
-                Ok(_) => {
+                Ok((duration_secs, files_created, files_modified, _, _)) => {
                     let _ = tx
                         .send(BaroEvent::ReviewLog {
                             line: format!("Fix {} completed", fix_id),
+                        })
+                        .await;
+                    let _ = tx
+                        .send(BaroEvent::StoryComplete {
+                            id: fix_id.clone(),
+                            duration_secs,
+                            files_created,
+                            files_modified,
                         })
                         .await;
                 }
@@ -894,6 +902,14 @@ async fn run_review_for_level(
                     let _ = tx
                         .send(BaroEvent::ReviewLog {
                             line: format!("Fix {} failed: {}", fix_id, e),
+                        })
+                        .await;
+                    let _ = tx
+                        .send(BaroEvent::StoryComplete {
+                            id: fix_id.clone(),
+                            duration_secs: 0,
+                            files_created: 0,
+                            files_modified: 0,
                         })
                         .await;
                 }
