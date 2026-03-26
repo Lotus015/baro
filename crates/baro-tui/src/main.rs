@@ -59,6 +59,10 @@ enum AppEvent {
     Key(crossterm::event::KeyEvent),
     PlanReady(Vec<ReviewStory>, String, String, String),
     PlanError(String),
+    #[allow(dead_code)]
+    RefineReady(Vec<ReviewStory>, String, String, String),
+    #[allow(dead_code)]
+    RefineError(String),
     Tick,
 }
 
@@ -236,6 +240,17 @@ async fn run_app(
                 app.show_review(stories);
             }
             Some(AppEvent::PlanError(err)) => {
+                app.planning_error = Some(err);
+            }
+            Some(AppEvent::RefineReady(stories, project, branch, description)) => {
+                app.refining = false;
+                app.project = project;
+                app.branch_name = branch;
+                app.description = description;
+                app.show_review(stories);
+            }
+            Some(AppEvent::RefineError(err)) => {
+                app.refining = false;
                 app.planning_error = Some(err);
             }
             Some(AppEvent::Key(key)) => {

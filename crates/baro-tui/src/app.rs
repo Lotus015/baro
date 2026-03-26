@@ -138,6 +138,11 @@ pub struct App {
     // Resume mode
     pub is_resume: bool,
 
+    // Refinement
+    #[allow(dead_code)]
+    pub refine_input: Option<String>,
+    pub refining: bool,
+
     // Config
     pub parallel_limit: u32,
     pub timeout_secs: u64,
@@ -183,6 +188,8 @@ impl App {
             finalize_in_progress: false,
             pr_url: None,
             is_resume: false,
+            refine_input: None,
+            refining: false,
             parallel_limit: 0,
             timeout_secs: 600,
             global_tab: GlobalTab::Dashboard,
