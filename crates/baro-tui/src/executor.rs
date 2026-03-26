@@ -800,6 +800,8 @@ pub async fn run_executor(
     prd: PrdFile,
     cwd: PathBuf,
     tx: mpsc::Sender<BaroEvent>,
+    _parallel: u32,
+    _timeout_secs: u64,
 ) {
     let prd_path = cwd.join("prd.json");
     let stories = &prd.user_stories;

@@ -44,6 +44,14 @@ struct Cli {
     /// Resume execution from existing prd.json
     #[arg(long)]
     resume: bool,
+
+    /// Max parallel story executors (0 = unlimited)
+    #[arg(long, default_value = "0")]
+    parallel: u32,
+
+    /// Per-story timeout in seconds
+    #[arg(long, default_value = "600")]
+    timeout: u64,
 }
 
 enum AppEvent {
@@ -146,6 +154,8 @@ async fn run_app(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     let cwd = std::fs::canonicalize(&cli.cwd)?;
+    let parallel = cli.parallel;
+    let timeout_secs = cli.timeout;
 
     app.planner = match cli.planner.as_str() {
         "openai" => Planner::OpenAI,
@@ -278,7 +288,7 @@ async fn run_app(
                                             if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
                                                 eprintln!("[baro] branch checkout failed: {}", e);
                                             }
-                                            spawn_executor(prd, exec_cwd, branch_tx);
+                                            spawn_executor(prd, exec_cwd, branch_tx, parallel, timeout_secs);
                                         });
                                     }
                                     Err(e) => {
@@ -309,7 +319,7 @@ async fn run_app(
                                         if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
                                             eprintln!("[baro] branch creation failed: {}", e);
                                         }
-                                        spawn_executor(exec_prd, exec_cwd, branch_tx);
+                                        spawn_executor(exec_prd, exec_cwd, branch_tx, parallel, timeout_secs);
                                     });
                                 }
                             }
@@ -365,7 +375,7 @@ fn spawn_planner(app: &App, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
     });
 }
 
-fn spawn_executor(prd: executor::PrdFile, cwd: PathBuf, tx: mpsc::Sender<AppEvent>) {
+fn spawn_executor(prd: executor::PrdFile, cwd: PathBuf, tx: mpsc::Sender<AppEvent>, parallel: u32, timeout_secs: u64) {
     // Create a channel bridge: executor sends BaroEvent, we wrap them as AppEvent::Baro
     let (exec_tx, mut exec_rx) = mpsc::channel::<BaroEvent>(256);
 
@@ -381,7 +391,7 @@ fn spawn_executor(prd: executor::PrdFile, cwd: PathBuf, tx: mpsc::Sender<AppEven
 
     // Run executor
     tokio::spawn(async move {
-        executor::run_executor(prd, cwd, exec_tx).await;
+        executor::run_executor(prd, cwd, exec_tx, parallel, timeout_secs).await;
     });
 }
 
