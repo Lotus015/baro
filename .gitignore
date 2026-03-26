@@ -3,3 +3,4 @@ dist/
 target/
 *.lock
 .DS_Store
+prd.json
