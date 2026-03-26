@@ -1,35 +1,35 @@
 {
-  "project": "fix-token-usage-tracking",
   "branchName": "fix/token-usage-parsing",
   "description": "Fix incorrect token usage tracking by capturing usage from all Claude CLI stream event types",
+  "project": "fix-token-usage-tracking",
   "userStories": [
     {
-      "id": "S1",
-      "priority": 1,
-      "title": "Refactor parser to capture usage from all event types",
-      "description": "In executor.rs, refactor parse_claude_stream_line to: 1) Replace the tuple return type (Vec<String>, Option<(u64, u64)>) with a named struct ParseResult { logs: Vec<String>, tokens: Option<(u64, u64)> }. 2) In the 'assistant' match arm, also check ev.get('message').and_then(|m| m.get('usage')) for input_tokens/output_tokens and return them in tokens if found. 3) After the match block (as a fallback for any event type), check for a root-level ev.get('usage') field and extract tokens from it if present and no tokens were captured yet. This ensures usage data is captured from: result events (existing), assistant message events (new), and any other event type with root-level usage (new). 4) Update all call sites of parse_claude_stream_line in run_claude_for_story to destructure the new ParseResult struct instead of the tuple. Make sure cargo build passes with zero warnings.",
-      "dependsOn": [],
-      "retries": 2,
       "acceptance": [],
+      "completedAt": "2026-03-26T20:23:10.569429+00:00",
+      "dependsOn": [],
+      "description": "In executor.rs, refactor parse_claude_stream_line to: 1) Replace the tuple return type (Vec<String>, Option<(u64, u64)>) with a named struct ParseResult { logs: Vec<String>, tokens: Option<(u64, u64)> }. 2) In the 'assistant' match arm, also check ev.get('message').and_then(|m| m.get('usage')) for input_tokens/output_tokens and return them in tokens if found. 3) After the match block (as a fallback for any event type), check for a root-level ev.get('usage') field and extract tokens from it if present and no tokens were captured yet. This ensures usage data is captured from: result events (existing), assistant message events (new), and any other event type with root-level usage (new). 4) Update all call sites of parse_claude_stream_line in run_claude_for_story to destructure the new ParseResult struct instead of the tuple. Make sure cargo build passes with zero warnings.",
+      "durationSecs": 84,
+      "id": "S1",
+      "passes": true,
+      "priority": 1,
+      "retries": 2,
       "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "title": "Refactor parser to capture usage from all event types"
     },
     {
-      "id": "S2",
-      "priority": 2,
-      "title": "Add unit tests for token usage parsing",
-      "description": "Add a #[cfg(test)] module at the bottom of executor.rs with unit tests for parse_claude_stream_line covering all usage extraction paths: 1) Test result event with usage field returns correct tokens. 2) Test assistant event with message.usage returns correct tokens. 3) Test event with root-level usage returns correct tokens. 4) Test non-JSON line returns no tokens. 5) Test assistant event without usage returns None for tokens. 6) Test that tool_use blocks are logged correctly. 7) Test realistic multi-turn scenario where the last event has cumulative usage. Use serde_json::json! macro to construct test events. Ensure cargo test passes.",
+      "acceptance": [],
+      "completedAt": "2026-03-26T20:24:52.996253+00:00",
       "dependsOn": [
         "S1"
       ],
+      "description": "Add a #[cfg(test)] module at the bottom of executor.rs with unit tests for parse_claude_stream_line covering all usage extraction paths: 1) Test result event with usage field returns correct tokens. 2) Test assistant event with message.usage returns correct tokens. 3) Test event with root-level usage returns correct tokens. 4) Test non-JSON line returns no tokens. 5) Test assistant event without usage returns None for tokens. 6) Test that tool_use blocks are logged correctly. 7) Test realistic multi-turn scenario where the last event has cumulative usage. Use serde_json::json! macro to construct test events. Ensure cargo test passes.",
+      "durationSecs": 79,
+      "id": "S2",
+      "passes": true,
+      "priority": 2,
       "retries": 2,
-      "acceptance": [],
       "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "title": "Add unit tests for token usage parsing"
     }
   ]
 }
