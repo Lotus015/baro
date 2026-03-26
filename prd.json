@@ -18,14 +18,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T19:24:19.089417+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "In crates/baro-tui/src/main.rs, modify spawn_planner() to accept model config. Use app.model_for_phase(\"planning\") to get the model. Modify run_claude_planner() to accept an optional model parameter (Option<String>). When the model is Some(name), add \"--model\" and the name to the args array passed to Command::new(\"claude\"). The claude CLI accepts `--model <name>` flag. Do the same for spawn_refiner() / its claude call — use the planning model for refinement too. Ensure cargo build passes with zero warnings.",
-      "durationSecs": null,
+      "durationSecs": 74,
       "id": "S2",
-      "passes": false,
+      "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
@@ -61,14 +61,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T19:24:46.835410+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "In crates/baro-tui/src/screens/execute.rs, modify render_header() to add a model indicator span in the header info line after the existing spans. If app.model_routing is true and app.override_model is None, show \"model: routed\" in ACCENT color. If app.override_model is Some(name), show \"model: <name>\" in WARNING color. If model_routing is false and override_model is None, show \"model: default\" in MUTED color. Add it with a separator like the existing spans. Also check screens/execute_completion.rs — if there's a summary section, add the model info there too. Ensure cargo build passes with zero warnings.",
-      "durationSecs": null,
+      "durationSecs": 103,
       "id": "S4",
-      "passes": false,
+      "passes": true,
       "priority": 5,
       "retries": 2,
       "tests": [],

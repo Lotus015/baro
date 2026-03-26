@@ -216,6 +216,16 @@ async fn execute_story(
             })
             .await;
 
+        let model_label = model
+            .as_deref()
+            .unwrap_or("default");
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: story.id.clone(),
+                line: format!("[model] using {}", model_label),
+            })
+            .await;
+
         // Git pull --rebase before running claude (best-effort, never fatal)
         {
             let _git_lock = git_mutex.lock().await;
@@ -225,7 +235,8 @@ async fn execute_story(
         let start = Instant::now();
         let prompt = build_prompt(story, cwd);
 
-        let result = run_claude_for_story(&story.id, &prompt, cwd, tx, timeout_secs).await;
+        let result =
+            run_claude_for_story(&story.id, &prompt, cwd, tx, timeout_secs, &model).await;
 
         let duration_secs = start.elapsed().as_secs();
 
@@ -292,16 +303,24 @@ async fn run_claude_for_story(
     cwd: &Path,
     tx: &mpsc::Sender<BaroEvent>,
     timeout_secs: u64,
+    model: &Option<String>,
 ) -> Result<(), String> {
+    let mut args = vec![
+        "--dangerously-skip-permissions",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        prompt,
+    ];
+    let model_owned;
+    if let Some(ref m) = model {
+        model_owned = m.clone();
+        args.push("--model");
+        args.push(&model_owned);
+    }
     let mut child = Command::new("claude")
-        .args([
-            "--dangerously-skip-permissions",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "-p",
-            prompt,
-        ])
+        .args(&args)
         .current_dir(cwd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -530,6 +549,8 @@ async fn run_review_for_level(
     prd_path: &Path,
     level_index: usize,
     timeout_secs: u64,
+    model_routing: bool,
+    override_model: &Option<String>,
 ) -> (u32, u32) {
     let mut cycles_run: u32 = 0;
     let mut total_fixes_applied: u32 = 0;
@@ -667,6 +688,14 @@ async fn run_review_for_level(
             }
         );
 
+        let review_model = resolve_model(override_model, &None, model_routing, "review");
+        let review_model_label = review_model.as_deref().unwrap_or("default");
+        let _ = tx
+            .send(BaroEvent::ReviewLog {
+                line: format!("[model] review using {}", review_model_label),
+            })
+            .await;
+
         let _ = tx
             .send(BaroEvent::ReviewLog {
                 line: "Spawning Claude for review...".to_string(),
@@ -674,14 +703,19 @@ async fn run_review_for_level(
             .await;
 
         // Spawn claude for review
+        let mut review_args = vec![
+            "--dangerously-skip-permissions".to_string(),
+            "--output-format".to_string(),
+            "json".to_string(),
+            "-p".to_string(),
+            prompt.clone(),
+        ];
+        if let Some(ref m) = review_model {
+            review_args.push("--model".to_string());
+            review_args.push(m.clone());
+        }
         let child_result = Command::new("claude")
-            .args([
-                "--dangerously-skip-permissions",
-                "--output-format",
-                "json",
-                "-p",
-                &prompt,
-            ])
+            .args(&review_args)
             .current_dir(cwd)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -813,7 +847,10 @@ async fn run_review_for_level(
                 model: None,
             };
 
-            match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, timeout_secs).await {
+            let fix_model = resolve_model(override_model, &None, model_routing, "execute");
+            match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, timeout_secs, fix_model)
+                .await
+            {
                 Ok(_) => {
                     let _ = tx
                         .send(BaroEvent::ReviewLog {
@@ -864,6 +901,8 @@ pub async fn run_executor(
     tx: mpsc::Sender<BaroEvent>,
     parallel: u32,
     timeout_secs: u64,
+    model_routing: bool,
+    override_model: Option<String>,
 ) {
     let prd_path = cwd.join("prd.json");
     let stories = &prd.user_stories;
@@ -972,13 +1011,24 @@ pub async fn run_executor(
             let git_mutex = Arc::clone(&git_mutex);
 
             let semaphore = semaphore.clone();
+            let story_model =
+                resolve_model(&override_model, &story.model, model_routing, "execute");
             let handle = tokio::spawn(async move {
                 let _permit = if let Some(ref sem) = semaphore {
                     Some(sem.acquire().await.expect("semaphore closed"))
                 } else {
                     None
                 };
-                execute_story(&story, &cwd, &prd_path, &tx, &git_mutex, timeout_secs).await
+                execute_story(
+                    &story,
+                    &cwd,
+                    &prd_path,
+                    &tx,
+                    &git_mutex,
+                    timeout_secs,
+                    story_model,
+                )
+                .await
             });
             handles.push((story_id.clone(), handle));
         }
@@ -1047,6 +1097,8 @@ pub async fn run_executor(
                 &prd_path,
                 level_index,
                 timeout_secs,
+                model_routing,
+                &override_model,
             )
             .await;
             review_cycles += cycles;

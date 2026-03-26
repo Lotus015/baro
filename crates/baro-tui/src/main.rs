@@ -340,11 +340,13 @@ async fn run_app(
                                         app.start_execution();
                                         let exec_cwd = cwd.clone();
                                         let branch_tx = tx.clone();
+                                        let mr = app.model_routing;
+                                        let om = app.override_model.clone();
                                         tokio::spawn(async move {
                                             if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
                                                 eprintln!("[baro] branch checkout failed: {}", e);
                                             }
-                                            spawn_executor(prd, exec_cwd, branch_tx, parallel, timeout_secs);
+                                            spawn_executor(prd, exec_cwd, branch_tx, parallel, timeout_secs, mr, om);
                                         });
                                     }
                                     Err(e) => {
@@ -371,11 +373,13 @@ async fn run_app(
                                     let exec_prd = prd;
                                     let exec_cwd = cwd.clone();
                                     let branch_tx = tx.clone();
+                                    let mr = app.model_routing;
+                                    let om = app.override_model.clone();
                                     tokio::spawn(async move {
                                         if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
                                             eprintln!("[baro] branch creation failed: {}", e);
                                         }
-                                        spawn_executor(exec_prd, exec_cwd, branch_tx, parallel, timeout_secs);
+                                        spawn_executor(exec_prd, exec_cwd, branch_tx, parallel, timeout_secs, mr, om);
                                     });
                                 }
                             }
@@ -525,7 +529,15 @@ fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEven
     });
 }
 
-fn spawn_executor(prd: executor::PrdFile, cwd: PathBuf, tx: mpsc::Sender<AppEvent>, parallel: u32, timeout_secs: u64) {
+fn spawn_executor(
+    prd: executor::PrdFile,
+    cwd: PathBuf,
+    tx: mpsc::Sender<AppEvent>,
+    parallel: u32,
+    timeout_secs: u64,
+    model_routing: bool,
+    override_model: Option<String>,
+) {
     // Create a channel bridge: executor sends BaroEvent, we wrap them as AppEvent::Baro
     let (exec_tx, mut exec_rx) = mpsc::channel::<BaroEvent>(256);
 
@@ -541,7 +553,7 @@ fn spawn_executor(prd: executor::PrdFile, cwd: PathBuf, tx: mpsc::Sender<AppEven
 
     // Run executor
     tokio::spawn(async move {
-        executor::run_executor(prd, cwd, exec_tx, parallel, timeout_secs).await;
+        executor::run_executor(prd, cwd, exec_tx, parallel, timeout_secs, model_routing, override_model).await;
     });
 }
 
