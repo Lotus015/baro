@@ -28,41 +28,77 @@ baro "Add authentication with JWT and role-based access control"
 # Use OpenAI for planning
 baro --planner openai "Add WebSocket support"
 
+# Limit parallelism to 3 concurrent stories
+baro --parallel 3 "Refactor database layer"
+
+# Set story timeout to 5 minutes
+baro --timeout 300 "Add unit tests"
+
+# Force a specific model for all phases
+baro --model opus "Complex architecture redesign"
+
+# Disable model routing (use opus everywhere)
+baro --no-model-routing "Build entire app"
+
 # Resume interrupted execution
 baro --resume
 
 # Specify working directory
-baro --cwd ~/projects/myapp "Add unit tests"
+baro --cwd ~/projects/myapp "Add REST API"
 ```
 
 ## How it works
 
-1. **Plan** — Claude explores your codebase and generates a dependency graph of user stories
-2. **Review** — You review the plan, accept or quit
-3. **Execute** — Stories run in parallel on a feature branch, each with its own Claude agent
-4. **Review Agent** — After each level completes, a review agent checks the work against acceptance criteria and creates fix stories if needed
-5. **Finalize** — Creates a GitHub PR with summary when all stories complete
+1. **Plan** — Claude (Opus) explores your codebase and generates a dependency graph of user stories
+2. **Review** — You review the plan, refine with feedback, accept or quit
+3. **Execute** — Stories run in parallel on a feature branch, each with its own Claude agent (Sonnet)
+4. **Review Agent** — After each level, a review agent (Haiku) checks work against acceptance criteria and creates fix stories if needed
+5. **Finalize** — Runs build verification and creates a GitHub PR with full summary
 
 ## Features
 
 - **Parallel execution** — independent stories run simultaneously, respecting dependency order
 - **DAG engine** — topological sort with level grouping, cycle detection
+- **Model routing** — Opus for planning, Sonnet for execution, Haiku for review (configurable)
 - **Live TUI** — dashboard with story status, live agent logs, DAG view, stats
-- **Review agent** — automated code review between levels, auto-fix with retry
+- **Review agent** — automated code review between levels with build detection and auto-fix
+- **Plan refinement** — press `r` on review screen to give feedback and regenerate the plan
 - **Build detection** — auto-detects project type (Cargo, npm, Go, Python, Make) and runs builds during review
 - **Git coordination** — mutex-protected commits, auto-push with retry, pull --rebase, conflict detection
 - **Branch per run** — creates `baro/<name>` branch, keeps main clean
 - **Resume** — detects `prd.json` and resumes incomplete executions
-- **PR creation** — creates GitHub PR via `gh` CLI when done
+- **PR creation** — creates GitHub PR with stories table, stats, time saved, and review summary
+- **Configurable parallelism** — `--parallel N` to limit concurrent story execution
+- **Story timeout** — `--timeout SECONDS` kills stuck agents (default: 10 minutes)
+- **Time saved** — shows parallel speedup vs sequential execution
+- **System notifications** — terminal bell + OS notification (macOS/Linux) when done
 - **Retry logic** — failed stories retry automatically (configurable per story)
-- **Claude + OpenAI** — Claude as default planner/executor, OpenAI as alternative planner
+
+## Options
+
+```
+baro [goal] [options]
+
+Arguments:
+  goal                         Project goal (opens welcome screen if omitted)
+
+Options:
+  --planner <name>             Planner: claude or openai (default: claude)
+  --model <name>               Override model for all phases: opus, sonnet, haiku
+  --no-model-routing           Use opus for everything (disables routing)
+  --parallel <N>               Max concurrent stories, 0 = unlimited (default: 0)
+  --timeout <seconds>          Story timeout in seconds (default: 600)
+  --resume                     Resume from existing prd.json
+  --cwd <path>                 Working directory (default: current)
+  -h, --help                   Print help
+```
 
 ## Requirements
 
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) installed and authenticated
 - macOS (arm64/x64) or Linux (x64/arm64)
 - Node.js 18+ (only if using `--planner openai`)
-- `gh` CLI (optional, for PR creation)
+- `gh` CLI (optional, for automatic PR creation)
 
 ## Architecture
 
