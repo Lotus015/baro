@@ -37,11 +37,15 @@ pub fn render_completion(f: &mut Frame, app: &App) {
         .filter_map(|s| s.duration_secs)
         .sum();
     let wall_time = app.total_time_secs;
-    let saved_secs = sequential_time.saturating_sub(wall_time);
     let multiplier = if wall_time > 0 {
-        sequential_time as f64 / wall_time as f64
+        (sequential_time as f64 / wall_time as f64).max(1.0)
     } else {
         1.0
+    };
+    let saved_secs = if multiplier > 1.0 {
+        sequential_time.saturating_sub(wall_time)
+    } else {
+        0
     };
 
     let mut lines = vec![
@@ -91,9 +95,12 @@ pub fn render_completion(f: &mut Frame, app: &App) {
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
-        Line::from(vec![
+    ];
+
+    if app.total > 1 {
+        lines.push(Line::from(vec![
             Span::styled("  Time saved:     ", Style::default().fg(theme::MUTED)),
-            if app.total > 1 && multiplier > 1.0 {
+            if multiplier > 1.0 {
                 Span::styled(
                     format!(
                         "{}:{:02} with parallel execution ({:.1}x speedup)",
@@ -108,7 +115,10 @@ pub fn render_completion(f: &mut Frame, app: &App) {
             } else {
                 Span::styled("Parallelism: 1.0x", Style::default().fg(theme::MUTED))
             },
-        ]),
+        ]));
+    }
+
+    lines.extend(vec![
         Line::from(vec![
             Span::styled("  Files created:  ", Style::default().fg(theme::MUTED)),
             Span::styled(
@@ -141,7 +151,7 @@ pub fn render_completion(f: &mut Frame, app: &App) {
                 ),
             ),
         ]),
-    ];
+    ]);
 
     if let Some(ref url) = app.pr_url {
         lines.push(Line::from(vec![
