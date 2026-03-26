@@ -59,9 +59,7 @@ enum AppEvent {
     Key(crossterm::event::KeyEvent),
     PlanReady(Vec<ReviewStory>, String, String, String),
     PlanError(String),
-    #[allow(dead_code)]
     RefineReady(Vec<ReviewStory>, String, String, String),
-    #[allow(dead_code)]
     RefineError(String),
     Tick,
 }
@@ -288,6 +286,14 @@ async fn run_app(
                         // Overlay is open — handle overlay keys only
                         match key.code {
                             KeyCode::Esc => { app.refine_input = None; }
+                            KeyCode::Enter => {
+                                let feedback = app.refine_input.as_ref().unwrap().clone();
+                                if !feedback.is_empty() {
+                                    app.refining = true;
+                                    app.refine_input = None;
+                                    spawn_refiner(&app, &feedback, &cwd, tx.clone());
+                                }
+                            }
                             KeyCode::Char(c) => { app.refine_input.as_mut().unwrap().push(c); }
                             KeyCode::Backspace => { app.refine_input.as_mut().unwrap().pop(); }
                             _ => {}
@@ -402,6 +408,92 @@ fn spawn_planner(app: &App, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
             }
             Err(e) => {
                 let _ = tx.send(AppEvent::PlanError(e.to_string())).await;
+            }
+        }
+    });
+}
+
+fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
+    let feedback = feedback.to_string();
+    let cwd = cwd.to_path_buf();
+
+    // Build current plan JSON from app state
+    let stories_json: Vec<serde_json::Value> = app.review_stories.iter().map(|s| {
+        serde_json::json!({
+            "id": s.id,
+            "title": s.title,
+            "description": s.description,
+            "dependsOn": s.depends_on,
+        })
+    }).collect();
+    let plan_json = serde_json::json!({
+        "project": app.project,
+        "branchName": app.branch_name,
+        "description": app.description,
+        "userStories": stories_json,
+    });
+    let plan_str = serde_json::to_string_pretty(&plan_json).unwrap_or_default();
+
+    tokio::spawn(async move {
+        let prompt = format!(
+            "Here is the current plan:\n{}\nThe user wants these changes: {}\nGenerate an updated plan with the same JSON schema. Keep stories the user did not mention unchanged. Output ONLY valid JSON, no markdown, no explanation.",
+            plan_str, feedback
+        );
+
+        let result = async {
+            let output = Command::new("claude")
+                .args([
+                    "--dangerously-skip-permissions",
+                    "--output-format", "json",
+                    "-p",
+                    &prompt,
+                ])
+                .current_dir(&cwd)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()?
+                .wait_with_output()
+                .await?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Claude exited with {}: {}", output.status, stderr).into());
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let claude_output: serde_json::Value = serde_json::from_str(&stdout)
+                .map_err(|e| format!("Failed to parse Claude JSON wrapper: {}", e))?;
+
+            let plan_text = claude_output
+                .get("result")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&stdout);
+
+            let json_str = extract_json(plan_text);
+
+            let prd: PrdOutput = serde_json::from_str(&json_str)
+                .map_err(|e| format!("Failed to parse refined PRD JSON: {}\nRaw: {}", e, &json_str[..json_str.len().min(500)]))?;
+
+            let stories: Vec<ReviewStory> = prd.user_stories
+                .into_iter()
+                .map(|s| ReviewStory {
+                    id: s.id,
+                    title: s.title,
+                    description: s.description,
+                    depends_on: s.depends_on,
+                    completed: false,
+                })
+                .collect();
+
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((stories, prd.project, prd.branch_name, prd.description))
+        }.await;
+
+        match result {
+            Ok((stories, project, branch, description)) => {
+                let _ = tx.send(AppEvent::RefineReady(stories, project, branch, description)).await;
+            }
+            Err(e) => {
+                let _ = tx.send(AppEvent::RefineError(e.to_string())).await;
             }
         }
     });
