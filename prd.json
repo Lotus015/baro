@@ -18,14 +18,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T18:34:43.680528+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "In executor.rs, replace the PR body building block (lines 1103-1125) with the new format. The new body should be:\n\n1) A one-line summary: the goal text from current_prd.description (first sentence or full text if short).\n\n2) A '## Stories' section with a markdown table: | ID | Title | Duration | Status | where Status is 'Done' if passes==true, 'Skipped' otherwise. Duration should be formatted as e.g. '45s' or '2m 30s'. Include ALL stories (not just completed ones).\n\n3) A '## Stats' section with bullet points: total wall time (formatted nicely), time saved with parallelism (sequential_time - wall_time), speedup multiplier (sequential_time / wall_time as 1.0x format), files created, files modified, stories completed/total, stories skipped.\n\n4) A '## Review' section noting how many review cycles ran and how many fixes were auto-applied. Use the review_cycles and review_fixes_applied variables from S1.\n\n5) At the bottom: a horizontal rule then 'Built with [baro](https://www.npmjs.com/package/baro-ai) - Background Agent Runtime Orchestrator'.\n\nFormat everything as clean GitHub-flavored markdown. Make sure cargo build passes with zero warnings.",
-      "durationSecs": null,
+      "durationSecs": 79,
       "id": "S2",
-      "passes": false,
+      "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
