@@ -1172,29 +1172,37 @@ pub async fn run_executor(
         } else {
             format!("{}s", total_time_secs)
         };
-        let time_saved = sequential_time.saturating_sub(total_time_secs);
-        let time_saved_str = if time_saved >= 60 {
-            format!("{}m {}s", time_saved / 60, time_saved % 60)
-        } else {
-            format!("{}s", time_saved)
-        };
-        let speedup = if total_time_secs > 0 {
-            format!("{:.1}x", sequential_time as f64 / total_time_secs as f64)
-        } else {
-            "–".to_string()
-        };
         let total_stories = current_prd.user_stories.len();
+        let parallelism_stats = if total_stories > 1 {
+            let time_saved = sequential_time.saturating_sub(total_time_secs);
+            let time_saved_str = if time_saved >= 60 {
+                format!("{}m {}s", time_saved / 60, time_saved % 60)
+            } else {
+                format!("{}s", time_saved)
+            };
+            let raw_speedup = if total_time_secs > 0 {
+                sequential_time as f64 / total_time_secs as f64
+            } else {
+                1.0
+            };
+            let clamped_speedup = if raw_speedup < 1.0 { 1.0 } else { raw_speedup };
+            format!(
+                "- **Time saved:** {} (parallelism)\n\
+                 - **Speedup:** {:.1}x\n",
+                time_saved_str, clamped_speedup
+            )
+        } else {
+            String::new()
+        };
         body.push_str(&format!(
             "\n## Stats\n\n\
              - **Wall time:** {}\n\
-             - **Time saved:** {} (parallelism)\n\
-             - **Speedup:** {}\n\
+             {}\
              - **Files created:** {}\n\
              - **Files modified:** {}\n\
              - **Stories:** {}/{} completed, {} skipped\n",
             wall_time_str,
-            time_saved_str,
-            speedup,
+            parallelism_stats,
             total_files_created,
             total_files_modified,
             completed,
