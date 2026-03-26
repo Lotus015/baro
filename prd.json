@@ -1,20 +1,63 @@
 {
-  "branchName": "feat/completion-notification",
-  "description": "Send OS notification and terminal bell when all stories complete",
-  "project": "baro-completion-notification",
+  "branchName": "fix/speedup-floor-and-single-story",
+  "description": "Floor speedup to 1.0x minimum and hide time-saved for single-story runs",
+  "project": "fix-speedup-calculation",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-26T18:42:30.848047+00:00",
+      "completedAt": "2026-03-26T19:02:20.140597+00:00",
       "dependsOn": [],
-      "description": "In crates/baro-tui/src/executor.rs, right after the Done event is sent (around line 1074), add a notification block: (1) print terminal bell with print!(\"\\x07\"), (2) detect OS at runtime using std::env::consts::OS, (3) on \"macos\" run osascript -e 'display notification \"baro: all stories complete\" with title \"baro\"' via std::process::Command (not tokio, to keep it simple), (4) on \"linux\" run notify-send \"baro\" \"all stories complete\" via std::process::Command. All notification calls must be best-effort: ignore any errors from Command spawning or execution (use .ok() or let _ =). Do NOT add any new modules or files — keep all code inline in executor.rs. Ensure cargo build completes with zero warnings (no unused imports, no dead code).",
-      "durationSecs": 29,
+      "description": "In crates/baro-tui/src/executor.rs lines 1181-1203: 1) Clamp the speedup to a minimum of 1.0 — if sequential_time/total_time_secs < 1.0, display '1.0x' instead. 2) If there is only 1 story (total_stories == 1), skip the 'Time saved' and 'Speedup' lines entirely from the PR body stats section. Keep the rest of the stats (wall time, files, stories). Ensure no unused variable warnings — remove time_saved_str and speedup variables when they are not emitted, or gate their computation behind the same condition.",
+      "durationSecs": 110,
       "id": "S1",
       "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Add completion notification after Done event"
+      "title": "Fix speedup in executor.rs PR body"
+    },
+    {
+      "acceptance": [],
+      "completedAt": "2026-03-26T19:01:19.813291+00:00",
+      "dependsOn": [],
+      "description": "In crates/baro-tui/src/screens/execute_stats.rs lines 149-185: 1) After computing multiplier, clamp it: if multiplier < 1.0, set it to 1.0. 2) If completed_count <= 1, skip the 'Saved:' line entirely (do not push any summary_line for saved time). Currently the else branch on line 175-185 shows '1.0x' — for single story, remove that line too so nothing about savings is shown. Ensure no unused variable warnings.",
+      "durationSecs": 49,
+      "id": "S2",
+      "passes": true,
+      "priority": 2,
+      "retries": 2,
+      "tests": [],
+      "title": "Fix speedup in execute_stats.rs stats tab"
+    },
+    {
+      "acceptance": [],
+      "completedAt": "2026-03-26T19:01:45.813571+00:00",
+      "dependsOn": [],
+      "description": "In crates/baro-tui/src/screens/execute_completion.rs lines 34-111: 1) Clamp multiplier to minimum 1.0 — if sequential_time/wall_time < 1.0, use 1.0. 2) If app.total == 1 (single story), skip the 'Time saved:' line entirely from the completion overlay. Currently lines 94-111 conditionally show either the time saved or 'Parallelism: 1.0x' — for single story, omit the entire Line::from block. Ensure no unused variable warnings (saved_secs may become unused when single story).",
+      "durationSecs": 77,
+      "id": "S3",
+      "passes": true,
+      "priority": 3,
+      "retries": 2,
+      "tests": [],
+      "title": "Fix speedup in execute_completion.rs overlay"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "description": "Run cargo build (and cargo clippy if available) across the entire workspace to verify there are zero warnings and zero errors after the changes from S1, S2, and S3. Fix any remaining warnings (unused variables, dead code, etc.) that may have been introduced.",
+      "durationSecs": null,
+      "id": "S4",
+      "passes": false,
+      "priority": 4,
+      "retries": 2,
+      "tests": [],
+      "title": "Final cargo build zero-warnings check"
     }
   ]
 }

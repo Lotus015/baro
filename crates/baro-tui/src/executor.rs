@@ -491,6 +491,7 @@ struct ReviewFix {
     description: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_review_for_level(
     saved_hash: &str,
     cwd: &Path,
