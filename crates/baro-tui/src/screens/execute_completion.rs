@@ -31,18 +31,28 @@ pub fn render_completion(f: &mut Frame, app: &App) {
         .map(|s| s.files_modified)
         .unwrap_or_else(|| app.stories.iter().map(|s| s.files_modified).sum());
 
-    let sequential_time: u64 = app
-        .stories
-        .iter()
-        .filter_map(|s| s.duration_secs)
-        .sum();
     let wall_time = app.total_time_secs;
+    let sequential_time: u64 = {
+        let sum: u64 = app
+            .stories
+            .iter()
+            .filter_map(|s| s.duration_secs)
+            .sum();
+        // Fallback: if no story durations were recorded but stories did complete,
+        // use wall_time so the display condition (sequential_time > wall_time) is false
+        // and we avoid showing nonsensical "Time saved" values.
+        if sum == 0 && completed > 0 {
+            wall_time
+        } else {
+            sum
+        }
+    };
     let multiplier = if wall_time > 0 {
         (sequential_time as f64 / wall_time as f64).max(1.0)
     } else {
         1.0
     };
-    let saved_secs = if multiplier > 1.0 {
+    let saved_secs = if sequential_time > wall_time {
         sequential_time.saturating_sub(wall_time)
     } else {
         0
@@ -97,24 +107,20 @@ pub fn render_completion(f: &mut Frame, app: &App) {
         ]),
     ];
 
-    if app.total > 1 {
+    if sequential_time > wall_time {
         lines.push(Line::from(vec![
             Span::styled("  Time saved:     ", Style::default().fg(theme::MUTED)),
-            if multiplier > 1.0 {
-                Span::styled(
-                    format!(
-                        "{}:{:02} with parallel execution ({:.1}x speedup)",
-                        saved_secs / 60,
-                        saved_secs % 60,
-                        multiplier
-                    ),
-                    Style::default()
-                        .fg(theme::SUCCESS)
-                        .add_modifier(Modifier::BOLD),
-                )
-            } else {
-                Span::styled("Parallelism: 1.0x", Style::default().fg(theme::MUTED))
-            },
+            Span::styled(
+                format!(
+                    "{}:{:02} with parallel execution ({:.1}x speedup)",
+                    saved_secs / 60,
+                    saved_secs % 60,
+                    multiplier
+                ),
+                Style::default()
+                    .fg(theme::SUCCESS)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]));
     }
 
