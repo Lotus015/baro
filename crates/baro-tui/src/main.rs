@@ -156,41 +156,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal.show_cursor()?;
     terminal.backend_mut().flush()?;
 
-    match result {
-        Ok(notify) => {
-            if notify {
-                // Fire notification outside the alternate screen so it actually works
-                print!("\x07"); // terminal bell
-                match std::env::consts::OS {
-                    "macos" => {
-                        let _ = std::process::Command::new("osascript")
-                            .args([
-                                "-e",
-                                "display notification \"All stories complete\" with title \"baro\"",
-                            ])
-                            .spawn();
-                    }
-                    "linux" => {
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["baro", "all stories complete"])
-                            .spawn();
-                    }
-                    _ => {}
-                }
-            }
-            Ok(())
-        }
-        Err(err) => {
-            eprintln!("Error: {}", err);
-            std::process::exit(1);
-        }
+    if let Err(err) = result {
+        eprintln!("Error: {}", err);
+        std::process::exit(1);
     }
+    Ok(())
 }
 
 async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<std::fs::File>>,
     cli: Cli,
-) -> Result<bool, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     let cwd = std::fs::canonicalize(&cli.cwd)?;
     let parallel = cli.parallel;
@@ -276,7 +252,28 @@ async fn run_app(
     loop {
         terminal.draw(|f| ui::render(f, &app))?;
         match rx.recv().await {
-            Some(AppEvent::Baro(ev)) => app.handle_event(ev),
+            Some(AppEvent::Baro(ev)) => {
+                // Fire notification immediately when stories complete
+                if matches!(ev, BaroEvent::NotificationReady) {
+                    // Terminal bell works from inside alternate screen
+                    print!("\x07");
+                    // OS notification via spawned process (works from alternate screen)
+                    match std::env::consts::OS {
+                        "macos" => {
+                            let _ = std::process::Command::new("osascript")
+                                .args(["-e", "display notification \"All stories complete\" with title \"baro\""])
+                                .spawn();
+                        }
+                        "linux" => {
+                            let _ = std::process::Command::new("notify-send")
+                                .args(["baro", "All stories complete"])
+                                .spawn();
+                        }
+                        _ => {}
+                    }
+                }
+                app.handle_event(ev);
+            }
             Some(AppEvent::PlanReady(stories, project, branch, description)) => {
                 app.project = project;
                 app.branch_name = branch;
@@ -305,7 +302,7 @@ async fn run_app(
 
                 match app.screen {
                     Screen::Welcome => match key.code {
-                        KeyCode::Esc => return Ok(false),
+                        KeyCode::Esc => return Ok(()),
                         KeyCode::Enter => {
                             if !app.goal_input.is_empty() {
                                 app.start_planning();
@@ -318,7 +315,7 @@ async fn run_app(
                         _ => {}
                     },
                     Screen::Planning => match key.code {
-                        KeyCode::Esc | KeyCode::Char('q') => return Ok(false),
+                        KeyCode::Esc | KeyCode::Char('q') => return Ok(()),
                         KeyCode::Char('r') => {
                             if app.planning_error.is_some() {
                                 app.planning_error = None;
@@ -351,7 +348,7 @@ async fn run_app(
                                 app.refine_input = Some(String::new());
                             }
                         }
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(false),
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                         KeyCode::Enter => {
                             if app.is_resume {
                                 // Resume mode: read existing prd.json (has full acceptance/tests data)
@@ -417,7 +414,7 @@ async fn run_app(
                         _ => {}
                     }},
                     Screen::Execute => match key.code {
-                        KeyCode::Char('q') => return Ok(false),
+                        KeyCode::Char('q') => return Ok(()),
                         KeyCode::Char('1') => app.global_tab = app::GlobalTab::Dashboard,
                         KeyCode::Char('2') => app.global_tab = app::GlobalTab::Dag,
                         KeyCode::Char('3') => app.global_tab = app::GlobalTab::Stats,
@@ -438,7 +435,7 @@ async fn run_app(
             None => break,
         }
     }
-    Ok(app.notification_ready)
+    Ok(())
 }
 
 fn spawn_planner(app: &App, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
