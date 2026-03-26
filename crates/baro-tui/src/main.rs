@@ -165,7 +165,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = std::process::Command::new("osascript")
                             .args([
                                 "-e",
-                                "display notification \"baro: all stories complete\" with title \"baro\"",
+                                "display notification \"All stories complete\" with title \"baro\"",
                             ])
                             .spawn();
                     }

@@ -1,99 +1,119 @@
 {
-  "branchName": "fix-notification-add-token-tracking",
-  "description": "Fix completion notification (runs outside TUI) and add token cost tracking with per-story and total display",
-  "project": "baro-notification-and-tokens",
+  "project": "tui-bugfixes",
+  "branchName": "fix-tui-5-bugs",
+  "description": "Fix 5 TUI bugs: zombie tabs, scrollback, review logs, time saved, notification",
   "userStories": [
     {
-      "acceptance": [],
-      "completedAt": "2026-03-26T19:43:21.656133+00:00",
-      "dependsOn": [],
-      "description": "In crates/baro-tui/src/events.rs, add two new variants to the BaroEvent enum: (1) NotificationReady - a simple variant with no fields, serde-renamed to 'notification_ready'. (2) TokenUsage { id: String, input_tokens: u64, output_tokens: u64 } - serde-renamed to 'token_usage'. These are the foundation events that other stories will emit and handle.",
-      "durationSecs": 16,
-      "id": "S1",
-      "passes": true,
+      "id": "S1a",
       "priority": 1,
+      "title": "Emit StoryComplete for fix stories in executor",
+      "description": "In executor.rs, after execute_story returns for a fix story inside run_review_for_level (lines 859-901), emit a StoryComplete event with the fix_id and appropriate duration/file stats on success (after line 886). On failure (after line 893), also emit StoryComplete or a cleanup event so the story is removed from active_stories.\n\nKey file: crates/baro-tui/src/executor.rs lines 859-901",
+      "dependsOn": [],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Add NotificationReady and TokenUsage events"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
-      "acceptance": [],
-      "completedAt": "2026-03-26T19:46:47.300365+00:00",
-      "dependsOn": [
-        "S1"
-      ],
-      "description": "Two changes: (1) In crates/baro-tui/src/executor.rs, replace the notification code block (terminal bell print!('\\x07') and osascript/notify-send spawn at lines ~1159-1176) with emitting BaroEvent::NotificationReady via the tx channel. Keep it after the Done event send. Remove the old print!/osascript/notify-send code entirely from executor.rs. (2) In crates/baro-tui/src/main.rs, after the terminal cleanup (after disable_raw_mode and LeaveAlternateScreen at ~line 153-156), and after the run_app result check, but before Ok(()), add notification code: print terminal bell, then run osascript on macos or notify-send on linux. This runs AFTER leaving the alternate screen so the notification actually fires. Also in main.rs handle_event or the event loop, add a match arm for BaroEvent::NotificationReady that sets a flag on App (add a field notification_ready: bool to App in app.rs), and after run_app returns in main(), check that flag to decide whether to notify. Pass the app out of run_app or use a shared flag.",
-      "durationSecs": 127,
-      "id": "S2",
-      "model": "opus",
-      "passes": true,
+      "id": "S1b",
       "priority": 2,
+      "title": "Ensure app.rs StoryComplete handler is robust for fix stories",
+      "description": "In app.rs StoryComplete handler (lines 361-378), verify it handles fix story IDs that aren't in app.stories gracefully — the find may return None for fix stories, which is fine, but active_stories.remove(story_id) must still execute unconditionally. Ensure the handler doesn't skip the active_stories removal when the story isn't found in app.stories.\n\nKey file: crates/baro-tui/src/app.rs lines 361-378",
+      "dependsOn": [],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Fix notification to run outside TUI alternate screen"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
-      "acceptance": [],
-      "completedAt": "2026-03-26T19:47:05.861486+00:00",
-      "dependsOn": [
-        "S1"
-      ],
-      "description": "In crates/baro-tui/src/executor.rs, modify the parse_claude_stream_line function. In the 'result' match arm (line ~156), after the existing result text parsing, check if the JSON event object has a 'usage' field. If ev.get('usage') exists, extract input_tokens and output_tokens as u64 from it. Return these values alongside the log lines. Change the return type to include optional token usage data, or add a second function. Then in the caller of parse_claude_stream_line (in run_claude_for_story or wherever stdout lines are processed), when token usage data is found, send a BaroEvent::TokenUsage { id: story_id, input_tokens, output_tokens } via the tx channel. The story_id parameter is already available as _story_id (rename it to story_id).",
-      "durationSecs": 145,
-      "id": "S3",
-      "passes": true,
+      "id": "S2",
       "priority": 3,
+      "title": "Fix terminal scrollback not cleared",
+      "description": "In main.rs, after EnterAlternateScreen (line 146) and Clear(ClearType::All) (line 147), add Clear(ClearType::Purge) to clear the entire scrollback buffer. ClearType::All only clears the visible screen; ClearType::Purge clears the entire scrollback buffer so users cannot scroll up past the TUI.\n\nKey file: crates/baro-tui/src/main.rs lines 146-147\n\nChange line 147 from:\n  execute!(tty, Clear(ClearType::All))?;\nTo:\n  execute!(tty, Clear(ClearType::All))?;\n  execute!(tty, Clear(ClearType::Purge))?;\n\nAlso verify the import of ClearType includes Purge (it's part of crossterm::terminal::ClearType enum, no new import needed).",
+      "dependsOn": [],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Parse token usage from Claude stream and emit TokenUsage"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
-      "acceptance": [],
-      "completedAt": "2026-03-26T19:45:10.107832+00:00",
-      "dependsOn": [
-        "S1"
-      ],
-      "description": "In crates/baro-tui/src/app.rs: (1) Add three new fields to the App struct: token_usage: HashMap<String, (u64, u64)> for per-story token tracking, total_input_tokens: u64, and total_output_tokens: u64. Initialize all to default/zero in App::new(). (2) In the handle_event method, add a match arm for BaroEvent::TokenUsage { id, input_tokens, output_tokens }. It should: insert or update the entry in token_usage HashMap (accumulate if multiple events per story), and add to total_input_tokens and total_output_tokens. Make sure to add 'use std::collections::HashMap' if not already imported (it is already used for active_stories).",
-      "durationSecs": 31,
-      "id": "S4",
-      "passes": true,
+      "id": "S3",
       "priority": 4,
+      "title": "Fix review agent logs not visible when review not in progress",
+      "description": "In execute_dashboard.rs render_logs function (line 136-188), review logs are only shown when active_ids.is_empty() AND app.review_in_progress is true AND review_logs is non-empty. But when the review completes (ReviewComplete sets review_in_progress=false in app.rs:440), the logs immediately disappear and the user sees 'Waiting for next story...' instead.\n\nThe fix: Change the condition at line 137 from:\n  if app.review_in_progress && !app.review_logs.is_empty() {\nTo:\n  if !app.review_logs.is_empty() {\n\nThis way review logs remain visible even after the review completes, until new stories start (which will populate active_ids and show story logs instead). The review_in_progress flag can still be used in the title to show whether review is active or done.\n\nUpdate the title to reflect status: when review_in_progress is true show spinner + 'Review Level N', when false show 'Review Level N (done)'.\n\nKey file: crates/baro-tui/src/screens/execute_dashboard.rs lines 136-188",
+      "dependsOn": [],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Track token usage in App state"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
-      "acceptance": [],
-      "completedAt": "2026-03-26T19:52:52.891945+00:00",
-      "dependsOn": [
-        "S3",
-        "S4"
-      ],
-      "description": "Three files to modify: (1) crates/baro-tui/src/screens/execute_stats.rs: In the Summary section, add a new line showing total tokens: 'Tokens: {total_input} in / {total_output} out' using app.total_input_tokens and app.total_output_tokens. Format large numbers with comma separators for readability. In the Story table, add a 'Tokens' column showing per-story token counts from app.token_usage. (2) crates/baro-tui/src/screens/execute_completion.rs: Add a line showing total tokens after the 'Model' line: 'Tokens: {total_input} in / {total_output} out'. Adjust box_height by +1 to accommodate. (3) crates/baro-tui/src/executor.rs: In the PR body Stats section (around line ~1280-1294), add a line '- **Tokens:** {total_input} input / {total_output} output'. The executor needs access to total tokens - since executor.rs doesn't have app state, track totals in run_executor using variables that accumulate from TokenUsage events sent, OR compute from the events already sent. Simplest: maintain local total_input_tokens and total_output_tokens counters in run_executor alongside existing counters, incrementing them when TokenUsage is emitted.",
-      "durationSecs": 318,
-      "id": "S5",
-      "model": "opus",
-      "passes": true,
+      "id": "S4a",
       "priority": 5,
+      "title": "Fix duration_secs tracking in StoryComplete handler",
+      "description": "In app.rs StoryComplete handler (lines 361-378), verify that duration_secs is being correctly set on matching stories. The story_id in the StoryComplete event (emitted at executor.rs:1083) must match story IDs in app.stories (initialized from incomplete stories at executor.rs:941-956). In resume mode, completed stories won't be in app.stories, so the find at app.rs:367 may return None — ensure this doesn't silently lose duration data needed for the completion screen.\n\nKey file: crates/baro-tui/src/app.rs lines 361-378",
+      "dependsOn": [],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Display tokens in stats, completion screen, and PR body"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
+      "id": "S4b",
+      "priority": 6,
+      "title": "Add fallback for time saved display in completion screen",
+      "description": "In execute_completion.rs (lines 34-49), make the sequential_time calculation robust. Add a fallback: if sequential_time is 0 but stories completed > 0, calculate from DoneStats or wall_time. Only show 'Time saved' line if sequential_time > wall_time (avoid showing nonsensical or empty values).\n\nKey file: crates/baro-tui/src/screens/execute_completion.rs lines 34-49",
+      "dependsOn": [],
+      "retries": 2,
       "acceptance": [],
-      "completedAt": "2026-03-26T19:54:44.141476+00:00",
+      "tests": [],
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
+    },
+    {
+      "id": "S5",
+      "priority": 7,
+      "title": "Verify and fix notification code",
+      "description": "Verify the notification code in main.rs (lines 158-178). The user wants:\n1. Notification runs AFTER LeaveAlternateScreen (line 154) - ALREADY TRUE\n2. Uses std::process::Command (not tokio) since we're outside async runtime - ALREADY TRUE (line 165)\n3. osascript command format should be: osascript -e 'display notification \"All stories complete\" with title \"baro\"'\n\nCurrent code at line 168 uses: 'display notification \"baro: all stories complete\" with title \"baro\"' - the message text should be changed to match the user's specification: 'display notification \"All stories complete\" with title \"baro\"'\n\nAlso verify that spawn() is the right approach (vs output() or status()) - spawn() is non-blocking which is fine for a notification.\n\nKey file: crates/baro-tui/src/main.rs lines 158-178",
+      "dependsOn": [],
+      "retries": 2,
+      "acceptance": [],
+      "tests": [],
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
+    },
+    {
+      "id": "S6",
+      "priority": 8,
+      "title": "Final cargo build zero-warnings check and integration validation",
+      "description": "Run cargo build on the entire workspace and ensure zero warnings. Run cargo clippy if available. Review all changes from S1-S5 together to ensure they don't conflict or introduce regressions.\n\nKey checks:\n1. cargo build --workspace produces zero warnings\n2. All event handling in app.rs is consistent (no unhandled cases)\n3. The fix story StoryComplete events from S1a don't cause issues with progress counting\n4. The review logs display from S3 doesn't cause rendering issues when transitioning between states\n5. Token tracking still works for fix stories",
       "dependsOn": [
+        "S1a",
+        "S1b",
         "S2",
+        "S3",
+        "S4a",
+        "S4b",
         "S5"
       ],
-      "description": "Run 'cargo build 2>&1' and 'cargo clippy 2>&1' on the workspace. Fix ANY warnings (unused imports, unused variables, dead code, clippy lints). Verify all changes integrate correctly: events.rs has both new variants, executor.rs emits both events and no longer has notification code, main.rs handles notification after TUI exit, app.rs tracks tokens, stats/completion screens display tokens, PR body includes tokens. If any warnings remain, fix them. This is the final quality gate.",
-      "durationSecs": 26,
-      "id": "S6",
-      "passes": true,
-      "priority": 6,
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Final cargo build zero-warnings check and integration validation"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     }
   ]
 }
