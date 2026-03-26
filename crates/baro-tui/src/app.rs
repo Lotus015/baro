@@ -151,6 +151,9 @@ pub struct App {
     pub model_routing: bool,
     pub override_model: Option<String>,
 
+    // Notification flag
+    pub notification_ready: bool,
+
     // Token usage tracking
     pub token_usage: HashMap<String, (u64, u64)>,
     pub total_input_tokens: u64,
@@ -201,6 +204,7 @@ impl App {
             refining: false,
             parallel_limit: 0,
             timeout_secs: 600,
+            notification_ready: false,
             model_routing: true,
             override_model: None,
             token_usage: HashMap::new(),
@@ -460,7 +464,9 @@ impl App {
                 self.final_stats = Some(stats);
             }
 
-            BaroEvent::NotificationReady { .. } => {}
+            BaroEvent::NotificationReady { .. } => {
+                self.notification_ready = true;
+            }
 
             BaroEvent::TokenUsage { id, input_tokens, output_tokens } => {
                 let entry = self.token_usage.entry(id).or_insert((0, 0));
