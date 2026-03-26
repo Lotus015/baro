@@ -64,16 +64,16 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T19:52:52.891945+00:00",
       "dependsOn": [
         "S3",
         "S4"
       ],
       "description": "Three files to modify: (1) crates/baro-tui/src/screens/execute_stats.rs: In the Summary section, add a new line showing total tokens: 'Tokens: {total_input} in / {total_output} out' using app.total_input_tokens and app.total_output_tokens. Format large numbers with comma separators for readability. In the Story table, add a 'Tokens' column showing per-story token counts from app.token_usage. (2) crates/baro-tui/src/screens/execute_completion.rs: Add a line showing total tokens after the 'Model' line: 'Tokens: {total_input} in / {total_output} out'. Adjust box_height by +1 to accommodate. (3) crates/baro-tui/src/executor.rs: In the PR body Stats section (around line ~1280-1294), add a line '- **Tokens:** {total_input} input / {total_output} output'. The executor needs access to total tokens - since executor.rs doesn't have app state, track totals in run_executor using variables that accumulate from TokenUsage events sent, OR compute from the events already sent. Simplest: maintain local total_input_tokens and total_output_tokens counters in run_executor alongside existing counters, incrementing them when TokenUsage is emitted.",
-      "durationSecs": null,
+      "durationSecs": 318,
       "id": "S5",
       "model": "opus",
-      "passes": false,
+      "passes": true,
       "priority": 5,
       "retries": 2,
       "tests": [],

@@ -464,7 +464,7 @@ impl App {
                 self.final_stats = Some(stats);
             }
 
-            BaroEvent::NotificationReady { .. } => {
+            BaroEvent::NotificationReady => {
                 self.notification_ready = true;
             }
 
