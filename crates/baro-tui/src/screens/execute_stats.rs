@@ -11,7 +11,7 @@ use crate::theme;
 
 pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     let has_bar_data = app.stories.iter().any(|s| s.duration_secs.is_some());
-    let mut constraints = vec![Constraint::Length(7)]; // Summary
+    let mut constraints = vec![Constraint::Length(8)]; // Summary
     if has_bar_data {
         constraints.push(Constraint::Length(10)); // Bar chart
     }
@@ -47,6 +47,18 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     let total_files_created: u32 = app.stories.iter().map(|s| s.files_created).sum();
     let total_files_modified: u32 = app.stories.iter().map(|s| s.files_modified).sum();
     let final_stats = app.final_stats.as_ref();
+
+    let format_commas = |n: u64| -> String {
+        let s = n.to_string();
+        let mut result = String::new();
+        for (i, c) in s.chars().rev().enumerate() {
+            if i > 0 && i % 3 == 0 {
+                result.push(',');
+            }
+            result.push(c);
+        }
+        result.chars().rev().collect()
+    };
 
     // -- Time saved calculation --
     let sequential_time: u64 = completed_stories
@@ -146,6 +158,26 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
         ]),
     ];
 
+    // Tokens line
+    if app.total_input_tokens > 0 || app.total_output_tokens > 0 {
+        summary_lines.push(Line::from(vec![
+            Span::styled("  Tokens: ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{} in", format_commas(app.total_input_tokens)),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" / ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{} out", format_commas(app.total_output_tokens)),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
+
     // Third line: time saved (only shown for multiple stories)
     let completed_count = completed_stories.len();
     if completed_count > 1 {
@@ -232,7 +264,7 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     let table_chunk_idx = next_chunk;
 
     // -- Story table --
-    let header = Row::new(vec!["  ID", "Title", "Status", "Time", "Files", "Deps"]).style(
+    let header = Row::new(vec!["  ID", "Title", "Status", "Time", "Files", "Tokens", "Deps"]).style(
         Style::default()
             .fg(theme::ACCENT)
             .add_modifier(Modifier::BOLD),
@@ -280,6 +312,12 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
                 Cell::from("-")
             };
 
+            let tokens_cell = if let Some(&(inp, out)) = app.token_usage.get(&s.id) {
+                Cell::from(format!("{}/ {}", format_commas(inp), format_commas(out)))
+            } else {
+                Cell::from("-")
+            };
+
             let deps = if s.depends_on.is_empty() {
                 "-".to_string()
             } else {
@@ -292,6 +330,7 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
                 Cell::from(status_str.to_string()),
                 Cell::from(time),
                 files_cell,
+                tokens_cell,
                 Cell::from(deps),
             ])
             .style(Style::default().fg(color))
@@ -304,6 +343,7 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(8),
         Constraint::Length(8),
         Constraint::Length(8),
+        Constraint::Length(16),
         Constraint::Length(10),
     ];
 

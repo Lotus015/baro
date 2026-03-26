@@ -13,7 +13,7 @@ pub fn render_completion(f: &mut Frame, app: &App) {
     let area = f.area();
     let box_width = 50u16.min(area.width.saturating_sub(4));
     let pr_extra: u16 = if app.pr_url.is_some() { 1 } else { 0 };
-    let box_height = (16u16 + pr_extra).min(area.height.saturating_sub(2));
+    let box_height = (17u16 + pr_extra).min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(box_width)) / 2;
     let y = (area.height.saturating_sub(box_height)) / 2;
     let popup_area = Rect::new(x, y, box_width, box_height);
@@ -172,6 +172,30 @@ pub fn render_completion(f: &mut Frame, app: &App) {
                     theme::MUTED
                 },
             ),
+        ),
+    ]));
+
+    let format_commas = |n: u64| -> String {
+        let s = n.to_string();
+        let mut result = String::new();
+        for (i, c) in s.chars().rev().enumerate() {
+            if i > 0 && i % 3 == 0 {
+                result.push(',');
+            }
+            result.push(c);
+        }
+        result.chars().rev().collect()
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled("  Tokens:         ", Style::default().fg(theme::MUTED)),
+        Span::styled(
+            format!(
+                "{} in / {} out",
+                format_commas(app.total_input_tokens),
+                format_commas(app.total_output_tokens)
+            ),
+            Style::default().fg(theme::ACCENT),
         ),
     ]));
 

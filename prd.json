@@ -18,15 +18,15 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T19:46:47.300365+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "Two changes: (1) In crates/baro-tui/src/executor.rs, replace the notification code block (terminal bell print!('\\x07') and osascript/notify-send spawn at lines ~1159-1176) with emitting BaroEvent::NotificationReady via the tx channel. Keep it after the Done event send. Remove the old print!/osascript/notify-send code entirely from executor.rs. (2) In crates/baro-tui/src/main.rs, after the terminal cleanup (after disable_raw_mode and LeaveAlternateScreen at ~line 153-156), and after the run_app result check, but before Ok(()), add notification code: print terminal bell, then run osascript on macos or notify-send on linux. This runs AFTER leaving the alternate screen so the notification actually fires. Also in main.rs handle_event or the event loop, add a match arm for BaroEvent::NotificationReady that sets a flag on App (add a field notification_ready: bool to App in app.rs), and after run_app returns in main(), check that flag to decide whether to notify. Pass the app out of run_app or use a shared flag.",
-      "durationSecs": null,
+      "durationSecs": 127,
       "id": "S2",
       "model": "opus",
-      "passes": false,
+      "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
@@ -34,14 +34,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T19:47:05.861486+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "In crates/baro-tui/src/executor.rs, modify the parse_claude_stream_line function. In the 'result' match arm (line ~156), after the existing result text parsing, check if the JSON event object has a 'usage' field. If ev.get('usage') exists, extract input_tokens and output_tokens as u64 from it. Return these values alongside the log lines. Change the return type to include optional token usage data, or add a second function. Then in the caller of parse_claude_stream_line (in run_claude_for_story or wherever stdout lines are processed), when token usage data is found, send a BaroEvent::TokenUsage { id: story_id, input_tokens, output_tokens } via the tx channel. The story_id parameter is already available as _story_id (rename it to story_id).",
-      "durationSecs": null,
+      "durationSecs": 145,
       "id": "S3",
-      "passes": false,
+      "passes": true,
       "priority": 3,
       "retries": 2,
       "tests": [],

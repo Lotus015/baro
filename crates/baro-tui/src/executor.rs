@@ -96,6 +96,18 @@ fn build_prompt(story: &PrdStory, cwd: &Path) -> String {
 
 // ─── Claude stream-json parser ──────────────────────────────
 
+fn format_with_commas(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
 fn parse_claude_stream_line(line: &str, _story_id: &str) -> (Vec<String>, Option<(u64, u64)>) {
     let mut logs = Vec::new();
 
@@ -210,7 +222,7 @@ async fn execute_story(
     git_mutex: &Mutex<()>,
     timeout_secs: u64,
     model: Option<String>,
-) -> Result<(u64, u32, u32), String> {
+) -> Result<(u64, u32, u32, u64, u64), String> {
     let max_attempts = story.retries + 1;
 
     for attempt in 1..=max_attempts {
@@ -246,7 +258,7 @@ async fn execute_story(
         let duration_secs = start.elapsed().as_secs();
 
         match result {
-            Ok(()) => {
+            Ok((story_input_tokens, story_output_tokens)) => {
                 // Acquire git mutex for prd update and git stats
                 let (files_created, files_modified) = {
                     let _git_lock = git_mutex.lock().await;
@@ -273,7 +285,7 @@ async fn execute_story(
                     })
                     .await;
 
-                return Ok((duration_secs, files_created, files_modified));
+                return Ok((duration_secs, files_created, files_modified, story_input_tokens, story_output_tokens));
             }
             Err(err) => {
                 let _ = tx
@@ -309,7 +321,7 @@ async fn run_claude_for_story(
     tx: &mpsc::Sender<BaroEvent>,
     timeout_secs: u64,
     model: &Option<String>,
-) -> Result<(), String> {
+) -> Result<(u64, u64), String> {
     let mut args = vec![
         "--dangerously-skip-permissions",
         "--output-format",
@@ -345,6 +357,8 @@ async fn run_claude_for_story(
         let stdout_task = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
+            let mut acc_input: u64 = 0;
+            let mut acc_output: u64 = 0;
             while let Ok(Some(line)) = lines.next_line().await {
                 let (logs, token_usage) = parse_claude_stream_line(&line, &story_id_out);
                 for log in logs {
@@ -356,6 +370,8 @@ async fn run_claude_for_story(
                         .await;
                 }
                 if let Some((input_tokens, output_tokens)) = token_usage {
+                    acc_input += input_tokens;
+                    acc_output += output_tokens;
                     let _ = tx_out
                         .send(BaroEvent::TokenUsage {
                             id: story_id_out.clone(),
@@ -365,6 +381,7 @@ async fn run_claude_for_story(
                         .await;
                 }
             }
+            (acc_input, acc_output)
         });
 
         let story_id_err = story_id_owned.clone();
@@ -385,21 +402,22 @@ async fn run_claude_for_story(
             }
         });
 
-        let _ = stdout_task.await;
+        let token_totals = stdout_task.await.unwrap_or((0, 0));
         let _ = stderr_task.await;
 
-        child
+        let status = child
             .wait()
             .await
-            .map_err(|e| format!("Failed to wait for claude: {}", e))
+            .map_err(|e| format!("Failed to wait for claude: {}", e))?;
+        Ok::<_, String>((status, token_totals))
     })
     .await;
 
     match result {
         Ok(wait_result) => {
-            let status = wait_result?;
+            let (status, token_totals) = wait_result?;
             if status.success() {
-                Ok(())
+                Ok(token_totals)
             } else {
                 Err(format!("claude exited with code {}", status.code().unwrap_or(-1)))
             }
@@ -982,6 +1000,8 @@ pub async fn run_executor(
     let mut total_commits = 0u32;
     let mut review_cycles = 0u32;
     let mut review_fixes_applied = 0u32;
+    let mut total_input_tokens = 0u64;
+    let mut total_output_tokens = 0u64;
 
     // Create semaphore for parallelism limiting (0 = unlimited)
     let semaphore = if parallel > 0 {
@@ -1051,11 +1071,13 @@ pub async fn run_executor(
 
         for (story_id, handle) in handles {
             match handle.await {
-                Ok(Ok((duration_secs, files_created, files_modified))) => {
+                Ok(Ok((duration_secs, files_created, files_modified, story_input, story_output))) => {
                     completed += 1;
                     total_files_created += files_created;
                     total_files_modified += files_modified;
                     total_commits += 1;
+                    total_input_tokens += story_input;
+                    total_output_tokens += story_output;
                     level_completed_ids.push(story_id.clone());
 
                     let _ = tx
@@ -1281,11 +1303,14 @@ pub async fn run_executor(
              {}\
              - **Files created:** {}\n\
              - **Files modified:** {}\n\
+             - **Tokens:** {} input / {} output\n\
              - **Stories:** {}/{} completed, {} skipped\n",
             wall_time_str,
             parallelism_stats,
             total_files_created,
             total_files_modified,
+            format_with_commas(total_input_tokens),
+            format_with_commas(total_output_tokens),
             completed,
             total_stories,
             skipped
