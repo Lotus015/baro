@@ -451,6 +451,10 @@ impl App {
                 self.total_time_secs = total_time_secs;
                 self.final_stats = Some(stats);
             }
+
+            BaroEvent::NotificationReady { .. } => {}
+
+            BaroEvent::TokenUsage { .. } => {}
         }
     }
 
