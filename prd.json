@@ -1,35 +1,20 @@
 {
-  "branchName": "feat/enhanced-pr-body",
-  "description": "Improve the GitHub PR body created by baro with rich stats, story table, review info, and branding",
-  "project": "Enhanced PR Body",
+  "branchName": "feat/completion-notification",
+  "description": "Send OS notification and terminal bell when all stories complete",
+  "project": "baro-completion-notification",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-26T18:32:57.448714+00:00",
+      "completedAt": "2026-03-26T18:42:30.848047+00:00",
       "dependsOn": [],
-      "description": "In executor.rs run_executor(), add mutable counters review_cycles (u32) and review_fixes_applied (u32). Update run_review_for_level to return (u32, u32) representing (cycles_run, total_fixes_applied). After each call to run_review_for_level, accumulate into the counters. The function currently returns nothing (unit). Change its return type to (u32, u32) and return the accumulated cycle count and fix count from the for loop. At the call site (around line 1002), capture the return and add to the accumulators. Also compute sequential_time as the sum of all story duration_secs from current_prd.user_stories in the finalize block. These variables must be accessible in the finalize async block where the PR body is built.",
-      "durationSecs": 183,
+      "description": "In crates/baro-tui/src/executor.rs, right after the Done event is sent (around line 1074), add a notification block: (1) print terminal bell with print!(\"\\x07\"), (2) detect OS at runtime using std::env::consts::OS, (3) on \"macos\" run osascript -e 'display notification \"baro: all stories complete\" with title \"baro\"' via std::process::Command (not tokio, to keep it simple), (4) on \"linux\" run notify-send \"baro\" \"all stories complete\" via std::process::Command. All notification calls must be best-effort: ignore any errors from Command spawning or execution (use .ok() or let _ =). Do NOT add any new modules or files — keep all code inline in executor.rs. Ensure cargo build completes with zero warnings (no unused imports, no dead code).",
+      "durationSecs": 29,
       "id": "S1",
       "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Track review cycles and fixes in run_executor"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-26T18:34:43.680528+00:00",
-      "dependsOn": [
-        "S1"
-      ],
-      "description": "In executor.rs, replace the PR body building block (lines 1103-1125) with the new format. The new body should be:\n\n1) A one-line summary: the goal text from current_prd.description (first sentence or full text if short).\n\n2) A '## Stories' section with a markdown table: | ID | Title | Duration | Status | where Status is 'Done' if passes==true, 'Skipped' otherwise. Duration should be formatted as e.g. '45s' or '2m 30s'. Include ALL stories (not just completed ones).\n\n3) A '## Stats' section with bullet points: total wall time (formatted nicely), time saved with parallelism (sequential_time - wall_time), speedup multiplier (sequential_time / wall_time as 1.0x format), files created, files modified, stories completed/total, stories skipped.\n\n4) A '## Review' section noting how many review cycles ran and how many fixes were auto-applied. Use the review_cycles and review_fixes_applied variables from S1.\n\n5) At the bottom: a horizontal rule then 'Built with [baro](https://www.npmjs.com/package/baro-ai) - Background Agent Runtime Orchestrator'.\n\nFormat everything as clean GitHub-flavored markdown. Make sure cargo build passes with zero warnings.",
-      "durationSecs": 79,
-      "id": "S2",
-      "passes": true,
-      "priority": 2,
-      "retries": 2,
-      "tests": [],
-      "title": "Rewrite PR body with rich markdown format"
+      "title": "Add completion notification after Done event"
     }
   ]
 }
