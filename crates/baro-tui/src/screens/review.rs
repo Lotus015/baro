@@ -1,10 +1,8 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
-    },
+    widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame,
 };
 
@@ -218,4 +216,73 @@ pub fn render(f: &mut Frame, app: &App) {
         Span::styled(":quit", Style::default().fg(theme::MUTED)),
     ]));
     f.render_widget(footer, chunks[2]);
+
+    // Refine input overlay
+    if let Some(ref input) = app.refine_input {
+        let overlay_area = centered_rect(60, 5, area);
+
+        f.render_widget(Clear, overlay_area);
+
+        let cursor_char = if app.tick_count % 10 < 5 { "\u{2588}" } else { " " };
+        let input_line = Line::from(vec![
+            Span::styled(input.as_str(), Style::default().fg(theme::TEXT)),
+            Span::styled(cursor_char, Style::default().fg(theme::ACCENT)),
+        ]);
+        let hint_line = Line::from(Span::styled(
+            "Enter:send  Esc:cancel",
+            Style::default().fg(theme::MUTED),
+        ));
+
+        let paragraph = Paragraph::new(vec![input_line, Line::from(""), hint_line])
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme::ACCENT))
+                    .title(Span::styled(
+                        " Refine Plan ",
+                        Style::default()
+                            .fg(theme::ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+            )
+            .wrap(Wrap { trim: false });
+        f.render_widget(paragraph, overlay_area);
+    } else if app.refining {
+        let overlay_area = centered_rect(30, 3, area);
+
+        f.render_widget(Clear, overlay_area);
+
+        let paragraph = Paragraph::new(Line::from(Span::styled(
+            "Refining...",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme::ACCENT)),
+        );
+        f.render_widget(paragraph, overlay_area);
+    }
+}
+
+fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length((area.height.saturating_sub(height)) / 2),
+            Constraint::Length(height),
+            Constraint::Min(0),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Min(0),
+        ])
+        .split(vertical[1])[1]
 }

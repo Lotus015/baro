@@ -18,14 +18,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T18:10:50.935925+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "In the main event loop in main.rs, in the Screen::Review key handler: when 'r' is pressed and app.refine_input is None and app.refining is false, set app.refine_input = Some(String::new()) to open the overlay. When app.refine_input is Some (overlay is open), handle: KeyCode::Esc sets app.refine_input = None (cancel), KeyCode::Char(c) pushes to the string, KeyCode::Backspace pops from the string. The overlay input handling must come BEFORE the existing review key handling so it takes priority when the overlay is open. When overlay is open, do NOT process other review keys (scroll, quit, accept). Ensure cargo build passes with zero warnings.",
-      "durationSecs": null,
+      "durationSecs": 58,
       "id": "S2",
-      "passes": false,
+      "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
