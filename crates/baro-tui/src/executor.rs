@@ -500,7 +500,10 @@ async fn run_review_for_level(
     prd_path: &Path,
     level_index: usize,
     timeout_secs: u64,
-) {
+) -> (u32, u32) {
+    let mut cycles_run: u32 = 0;
+    let mut total_fixes_applied: u32 = 0;
+
     let _ = tx
         .send(BaroEvent::ReviewStart {
             level: level_index,
@@ -520,6 +523,7 @@ async fn run_review_for_level(
     let max_cycles = 2;
 
     for cycle in 0..max_cycles {
+        cycles_run += 1;
         let _ = tx
             .send(BaroEvent::ReviewLog {
                 line: format!("Review cycle {}/{}", cycle + 1, max_cycles),
@@ -547,7 +551,7 @@ async fn run_review_for_level(
                         ),
                     })
                     .await;
-                return;
+                return (cycles_run, total_fixes_applied);
             }
             Err(e) => {
                 let _ = tx
@@ -555,7 +559,7 @@ async fn run_review_for_level(
                         line: format!("git diff error: {}", e),
                     })
                     .await;
-                return;
+                return (cycles_run, total_fixes_applied);
             }
         };
 
@@ -572,7 +576,7 @@ async fn run_review_for_level(
                     fix_count: 0,
                 })
                 .await;
-            return;
+            return (cycles_run, total_fixes_applied);
         }
 
         // Collect acceptance criteria from completed stories
@@ -662,7 +666,7 @@ async fn run_review_for_level(
                         line: format!("Failed to spawn claude for review: {}", e),
                     })
                     .await;
-                return;
+                return (cycles_run, total_fixes_applied);
             }
         };
 
@@ -674,7 +678,7 @@ async fn run_review_for_level(
                         line: format!("Review claude process error: {}", e),
                     })
                     .await;
-                return;
+                return (cycles_run, total_fixes_applied);
             }
         };
 
@@ -687,7 +691,7 @@ async fn run_review_for_level(
                     ),
                 })
                 .await;
-            return;
+            return (cycles_run, total_fixes_applied);
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -722,7 +726,7 @@ async fn run_review_for_level(
                         fix_count: 0,
                     })
                     .await;
-                return;
+                return (cycles_run, total_fixes_applied);
             }
         };
 
@@ -739,11 +743,12 @@ async fn run_review_for_level(
                     fix_count: 0,
                 })
                 .await;
-            return;
+            return (cycles_run, total_fixes_applied);
         }
 
         // Review failed - create fix stories and execute them
         let fix_count = review.fixes.len() as u32;
+        total_fixes_applied += fix_count;
         let _ = tx
             .send(BaroEvent::ReviewLog {
                 line: format!(
@@ -812,11 +817,12 @@ async fn run_review_for_level(
                     fix_count,
                 })
                 .await;
-            return;
+            return (cycles_run, total_fixes_applied);
         }
 
         // Otherwise loop for re-review with new diff
     }
+    (cycles_run, total_fixes_applied)
 }
 
 // ─── Main executor entry point ──────────────────────────────
@@ -890,6 +896,8 @@ pub async fn run_executor(
     let mut total_files_created = 0u32;
     let mut total_files_modified = 0u32;
     let mut total_commits = 0u32;
+    let mut review_cycles = 0u32;
+    let mut review_fixes_applied = 0u32;
 
     // Create semaphore for parallelism limiting (0 = unlimited)
     let semaphore = if parallel > 0 {
@@ -999,7 +1007,7 @@ pub async fn run_executor(
                 .filter_map(|id| story_map.get(id.as_str()).copied())
                 .collect();
 
-            run_review_for_level(
+            let (cycles, fixes) = run_review_for_level(
                 &saved_hash,
                 &cwd,
                 &completed_stories,
@@ -1010,6 +1018,8 @@ pub async fn run_executor(
                 timeout_secs,
             )
             .await;
+            review_cycles += cycles;
+            review_fixes_applied += fixes;
         }
     }
 
@@ -1098,6 +1108,12 @@ pub async fn run_executor(
             .await
             .ok()?;
         let current_prd: PrdFile = serde_json::from_str(&prd_data).ok()?;
+
+        let sequential_time: u64 = current_prd
+            .user_stories
+            .iter()
+            .filter_map(|s| s.duration_secs)
+            .sum();
 
         // Build PR body
         let mut body = format!(
