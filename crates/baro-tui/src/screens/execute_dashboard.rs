@@ -144,7 +144,9 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
                 .collect();
 
             let title = if app.review_in_progress {
-                format!(" {} Review Level {} ", app.spinner_frame(), app.review_level)
+                let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+                let spinner = spinner_chars[(app.tick_count as usize) % spinner_chars.len()];
+                format!(" {} Review Level {} ", spinner, app.review_level)
             } else {
                 format!(" Review Level {} (done) ", app.review_level)
             };
