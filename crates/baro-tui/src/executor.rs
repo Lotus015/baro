@@ -96,7 +96,7 @@ fn build_prompt(story: &PrdStory, cwd: &Path) -> String {
 
 // ─── Claude stream-json parser ──────────────────────────────
 
-fn parse_claude_stream_line(line: &str, _story_id: &str) -> Vec<String> {
+fn parse_claude_stream_line(line: &str, _story_id: &str) -> (Vec<String>, Option<(u64, u64)>) {
     let mut logs = Vec::new();
 
     let Ok(ev) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -105,7 +105,7 @@ fn parse_claude_stream_line(line: &str, _story_id: &str) -> Vec<String> {
         if !trimmed.is_empty() {
             logs.push(trimmed.to_string());
         }
-        return logs;
+        return (logs, None);
     };
 
     let ev_type = ev.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -162,11 +162,16 @@ fn parse_claude_stream_line(line: &str, _story_id: &str) -> Vec<String> {
                     }
                 }
             }
+            if let Some(usage) = ev.get("usage") {
+                let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                return (logs, Some((input_tokens, output_tokens)));
+            }
         }
         _ => {}
     }
 
-    logs
+    (logs, None)
 }
 
 // ─── Model resolution helper ────────────────────────────────
@@ -341,12 +346,21 @@ async fn run_claude_for_story(
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let logs = parse_claude_stream_line(&line, &story_id_out);
+                let (logs, token_usage) = parse_claude_stream_line(&line, &story_id_out);
                 for log in logs {
                     let _ = tx_out
                         .send(BaroEvent::StoryLog {
                             id: story_id_out.clone(),
                             line: log,
+                        })
+                        .await;
+                }
+                if let Some((input_tokens, output_tokens)) = token_usage {
+                    let _ = tx_out
+                        .send(BaroEvent::TokenUsage {
+                            id: story_id_out.clone(),
+                            input_tokens,
+                            output_tokens,
                         })
                         .await;
                 }
