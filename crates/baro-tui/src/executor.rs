@@ -1449,3 +1449,114 @@ pub fn write_prd(prd: &PrdFile, cwd: &Path) -> std::io::Result<()> {
         .map_err(std::io::Error::other)?;
     std::fs::write(prd_path, format!("{}\n", content))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn line(v: serde_json::Value) -> String {
+        v.to_string()
+    }
+
+    // 1) result event with usage field returns correct tokens
+    #[test]
+    fn test_result_event_usage() {
+        let ev = line(json!({
+            "type": "result",
+            "result": "Task complete",
+            "usage": { "input_tokens": 100, "output_tokens": 50 }
+        }));
+        let r = parse_claude_stream_line(&ev, "s1");
+        assert_eq!(r.tokens, Some((100, 50)));
+    }
+
+    // 2) assistant event with message.usage returns correct tokens
+    #[test]
+    fn test_assistant_event_message_usage() {
+        let ev = line(json!({
+            "type": "assistant",
+            "message": {
+                "content": [],
+                "usage": { "input_tokens": 200, "output_tokens": 75 }
+            }
+        }));
+        let r = parse_claude_stream_line(&ev, "s1");
+        assert_eq!(r.tokens, Some((200, 75)));
+    }
+
+    // 3) event with root-level usage returns correct tokens (fallback path)
+    #[test]
+    fn test_root_level_usage_fallback() {
+        let ev = line(json!({
+            "type": "unknown_event",
+            "usage": { "input_tokens": 300, "output_tokens": 120 }
+        }));
+        let r = parse_claude_stream_line(&ev, "s1");
+        assert_eq!(r.tokens, Some((300, 120)));
+    }
+
+    // 4) non-JSON line returns no tokens
+    #[test]
+    fn test_non_json_line_no_tokens() {
+        let r = parse_claude_stream_line("this is not json", "s1");
+        assert_eq!(r.tokens, None);
+        assert_eq!(r.logs, vec!["this is not json"]);
+    }
+
+    // 5) assistant event without usage returns None for tokens
+    #[test]
+    fn test_assistant_event_no_usage() {
+        let ev = line(json!({
+            "type": "assistant",
+            "message": {
+                "content": [{ "type": "text", "text": "Hello" }]
+            }
+        }));
+        let r = parse_claude_stream_line(&ev, "s1");
+        assert_eq!(r.tokens, None);
+        assert!(r.logs.contains(&"Hello".to_string()));
+    }
+
+    // 6) tool_use blocks are logged correctly
+    #[test]
+    fn test_tool_use_logged() {
+        let ev = line(json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "bash",
+                    "input": { "command": "ls -la" }
+                }]
+            }
+        }));
+        let r = parse_claude_stream_line(&ev, "s1");
+        assert!(r.logs.iter().any(|l| l.starts_with("⚙ bash")));
+    }
+
+    // 7) realistic multi-turn scenario where last event has cumulative usage
+    #[test]
+    fn test_multi_turn_cumulative_usage() {
+        // First turn: assistant responds, some tokens used
+        let turn1 = line(json!({
+            "type": "assistant",
+            "message": {
+                "content": [{ "type": "text", "text": "I'll help with that." }],
+                "usage": { "input_tokens": 50, "output_tokens": 10 }
+            }
+        }));
+        // Last turn: result event with cumulative totals
+        let turn_final = line(json!({
+            "type": "result",
+            "result": "Done",
+            "usage": { "input_tokens": 1500, "output_tokens": 400 }
+        }));
+
+        let r1 = parse_claude_stream_line(&turn1, "s1");
+        assert_eq!(r1.tokens, Some((50, 10)));
+
+        let r_final = parse_claude_stream_line(&turn_final, "s1");
+        assert_eq!(r_final.tokens, Some((1500, 400)));
+    }
+}
