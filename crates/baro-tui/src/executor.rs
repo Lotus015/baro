@@ -169,6 +169,32 @@ fn parse_claude_stream_line(line: &str, _story_id: &str) -> Vec<String> {
     logs
 }
 
+// ─── Model resolution helper ────────────────────────────────
+
+fn resolve_model(
+    override_model: &Option<String>,
+    story_model: &Option<String>,
+    model_routing: bool,
+    phase: &str, // "execute" or "review"
+) -> Option<String> {
+    if let Some(ref m) = override_model {
+        return Some(m.clone());
+    }
+    if let Some(ref m) = story_model {
+        return Some(m.clone());
+    }
+    if model_routing {
+        return Some(
+            match phase {
+                "review" => "haiku",
+                _ => "sonnet",
+            }
+            .to_string(),
+        );
+    }
+    None
+}
+
 // ─── Execute a single story ─────────────────────────────────
 
 async fn execute_story(
@@ -178,6 +204,7 @@ async fn execute_story(
     tx: &mpsc::Sender<BaroEvent>,
     git_mutex: &Mutex<()>,
     timeout_secs: u64,
+    model: Option<String>,
 ) -> Result<(u64, u32, u32), String> {
     let max_attempts = story.retries + 1;
 

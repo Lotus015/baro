@@ -413,10 +413,11 @@ fn spawn_planner(app: &App, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
     let goal = app.goal_input.clone();
     let planner = app.planner;
     let cwd = cwd.to_path_buf();
+    let model = app.model_for_phase("planning");
 
     tokio::spawn(async move {
         let result = match planner {
-            Planner::Claude => run_claude_planner(&goal, &cwd).await,
+            Planner::Claude => run_claude_planner(&goal, &cwd, model.as_deref()).await,
             Planner::OpenAI => run_openai_planner(&goal, &cwd).await,
         };
 
@@ -434,6 +435,7 @@ fn spawn_planner(app: &App, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
 fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
     let feedback = feedback.to_string();
     let cwd = cwd.to_path_buf();
+    let model = app.model_for_phase("planning");
 
     // Build current plan JSON from app state
     let stories_json: Vec<serde_json::Value> = app.review_stories.iter().map(|s| {
@@ -459,13 +461,19 @@ fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEven
         );
 
         let result = async {
+            let mut args = vec![
+                "--dangerously-skip-permissions".to_string(),
+                "--output-format".to_string(), "json".to_string(),
+            ];
+            if let Some(ref model_name) = model {
+                args.push("--model".to_string());
+                args.push(model_name.clone());
+            }
+            args.push("-p".to_string());
+            args.push(prompt.clone());
+
             let output = Command::new("claude")
-                .args([
-                    "--dangerously-skip-permissions",
-                    "--output-format", "json",
-                    "-p",
-                    &prompt,
-                ])
+                .args(&args)
                 .current_dir(&cwd)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -537,16 +545,22 @@ fn spawn_executor(prd: executor::PrdFile, cwd: PathBuf, tx: mpsc::Sender<AppEven
     });
 }
 
-async fn run_claude_planner(goal: &str, cwd: &Path) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
+async fn run_claude_planner(goal: &str, cwd: &Path, model: Option<&str>) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
     let prompt = format!("{}\n\nUser goal: {}", CLAUDE_PLANNER_PROMPT, goal);
 
+    let mut args = vec![
+        "--dangerously-skip-permissions",
+        "--output-format", "json",
+    ];
+    if let Some(model_name) = model {
+        args.push("--model");
+        args.push(model_name);
+    }
+    args.push("-p");
+    args.push(&prompt);
+
     let output = Command::new("claude")
-        .args([
-            "--dangerously-skip-permissions",
-            "--output-format", "json",
-            "-p",
-            &prompt,
-        ])
+        .args(&args)
         .current_dir(cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

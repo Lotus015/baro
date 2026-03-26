@@ -99,6 +99,25 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
             format!("timeout: {}s", app.timeout_secs),
             Style::default().fg(theme::MUTED),
         ),
+        Span::styled(" │ ", Style::default().fg(theme::BORDER)),
+        Span::styled(
+            if let Some(ref name) = app.override_model {
+                format!("model: {}", name)
+            } else if app.model_routing {
+                "model: routed".to_string()
+            } else {
+                "model: default".to_string()
+            },
+            Style::default().fg(
+                if app.override_model.is_some() {
+                    theme::WARNING
+                } else if app.model_routing {
+                    theme::ACCENT
+                } else {
+                    theme::MUTED
+                },
+            ),
+        ),
     ]);
 
     let info = Paragraph::new(info_line).block(

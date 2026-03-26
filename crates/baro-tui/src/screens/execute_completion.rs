@@ -153,6 +153,28 @@ pub fn render_completion(f: &mut Frame, app: &App) {
         ]),
     ]);
 
+    lines.push(Line::from(vec![
+        Span::styled("  Model:          ", Style::default().fg(theme::MUTED)),
+        Span::styled(
+            if let Some(ref name) = app.override_model {
+                format!("{}", name)
+            } else if app.model_routing {
+                "routed".to_string()
+            } else {
+                "default".to_string()
+            },
+            Style::default().fg(
+                if app.override_model.is_some() {
+                    theme::WARNING
+                } else if app.model_routing {
+                    theme::ACCENT
+                } else {
+                    theme::MUTED
+                },
+            ),
+        ),
+    ]));
+
     if let Some(ref url) = app.pr_url {
         lines.push(Line::from(vec![
             Span::styled("  PR: ", Style::default().fg(theme::MUTED)),

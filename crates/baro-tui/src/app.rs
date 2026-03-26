@@ -461,7 +461,6 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
     pub fn model_for_phase(&self, phase: &str) -> Option<String> {
         if let Some(ref model) = self.override_model {
             return Some(model.clone());

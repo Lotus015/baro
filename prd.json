@@ -5,12 +5,12 @@
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T19:22:50.084844+00:00",
       "dependsOn": [],
       "description": "In crates/baro-tui/src/app.rs, add two new fields to the App struct: `model_routing: bool` (default true) and `override_model: Option<String>` (default None). Initialize them in App::new(). In crates/baro-tui/src/main.rs, add two new CLI flags to the Cli struct: `--model <name>` (optional, valid values: opus, sonnet, haiku) which sets override_model and disables routing, and `--no-model-routing` (bool flag) which is equivalent to --model opus. In run_app(), wire the CLI values into the App struct: if --model is set, set app.override_model = Some(value) and app.model_routing = false; if --no-model-routing is set, set app.override_model = Some(\"opus\") and app.model_routing = false. Also add a helper method on App like `fn model_for_phase(&self, phase: &str) -> Option<String>` that returns: if override_model is set, return that; if model_routing is true, return opus for \"planning\", sonnet for \"execution\", haiku for \"review\"; if model_routing is false and no override, return None (use default). Ensure cargo build passes with zero warnings.",
-      "durationSecs": null,
+      "durationSecs": 121,
       "id": "S1",
-      "passes": false,
+      "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
