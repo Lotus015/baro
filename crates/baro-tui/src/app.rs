@@ -151,6 +151,11 @@ pub struct App {
     pub model_routing: bool,
     pub override_model: Option<String>,
 
+    // Token usage tracking
+    pub token_usage: HashMap<String, (u64, u64)>,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+
     // UI state
     pub global_tab: GlobalTab,
     pub selected_log_index: usize,
@@ -198,6 +203,9 @@ impl App {
             timeout_secs: 600,
             model_routing: true,
             override_model: None,
+            token_usage: HashMap::new(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
             tick_count: 0,
@@ -454,7 +462,13 @@ impl App {
 
             BaroEvent::NotificationReady { .. } => {}
 
-            BaroEvent::TokenUsage { .. } => {}
+            BaroEvent::TokenUsage { id, input_tokens, output_tokens } => {
+                let entry = self.token_usage.entry(id).or_insert((0, 0));
+                entry.0 += input_tokens;
+                entry.1 += output_tokens;
+                self.total_input_tokens += input_tokens;
+                self.total_output_tokens += output_tokens;
+            }
         }
     }
 
