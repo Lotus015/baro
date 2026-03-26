@@ -1,65 +1,66 @@
 {
-  "branchName": "feat/parallel-limit-and-story-timeout",
-  "description": "Add configurable parallelism (--parallel N) and story timeout (--timeout SECONDS) CLI flags with TUI display",
-  "project": "baro-parallelism-timeout",
+  "branchName": "feat/plan-refinement-overlay",
+  "description": "Add plan refinement overlay to review screen with Claude-powered plan editing",
+  "project": "baro-plan-refinement",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-26T17:54:27.441990+00:00",
+      "completedAt": "2026-03-26T18:09:40.165561+00:00",
       "dependsOn": [],
-      "description": "In main.rs, add two new fields to the Cli struct: `parallel` (u32, long flag, default 0 meaning unlimited) and `timeout` (u64, long flag, default 600). Pass both values through spawn_executor to run_executor. Update run_executor signature to accept parallel: u32 and timeout_secs: u64 parameters. In spawn_executor, accept and forward these values. Do NOT yet implement semaphore or timeout logic - just thread the values through. Update both call sites of spawn_executor (line 281 and 312 in main.rs) to pass the CLI values.",
-      "durationSecs": 784,
+      "description": "Add `refine_input: Option<String>` field to the App struct in app.rs, initialized to None in App::new(). Add `refining: bool` field to track when a refinement request is in-flight. Add a `RefineReady` variant to the AppEvent enum in main.rs: `RefineReady(Vec<ReviewStory>, String, String, String)` (same shape as PlanReady) and a `RefineError(String)` variant. Ensure `cargo build` passes with zero warnings — all new fields and variants must be used or prefixed with _ if temporarily unused.",
+      "durationSecs": 83,
       "id": "S1",
       "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Add --parallel and --timeout CLI flags"
+      "title": "Add refine_input field and RefineReady event to App"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-26T17:55:45.270633+00:00",
+      "completedAt": null,
       "dependsOn": [
         "S1"
       ],
-      "description": "In executor.rs run_executor, implement configurable parallelism using tokio::sync::Semaphore. If parallel > 0, create an Arc<Semaphore> with parallel permits. In the level execution loop (around line 891-904), instead of spawning all stories immediately, acquire a semaphore permit before spawning each story's execute_story call. If parallel is 0, use no semaphore (current unlimited behavior). The semaphore should be created once before the level loop. Each story task should acquire a permit at the start and hold it until execute_story completes. Make sure to clone the Arc<Semaphore> for each spawned task.",
-      "durationSecs": 53,
+      "description": "In the main event loop in main.rs, in the Screen::Review key handler: when 'r' is pressed and app.refine_input is None and app.refining is false, set app.refine_input = Some(String::new()) to open the overlay. When app.refine_input is Some (overlay is open), handle: KeyCode::Esc sets app.refine_input = None (cancel), KeyCode::Char(c) pushes to the string, KeyCode::Backspace pops from the string. The overlay input handling must come BEFORE the existing review key handling so it takes priority when the overlay is open. When overlay is open, do NOT process other review keys (scroll, quit, accept). Ensure cargo build passes with zero warnings.",
+      "durationSecs": null,
       "id": "S2",
-      "passes": true,
+      "passes": false,
       "priority": 2,
       "retries": 2,
       "tests": [],
-      "title": "Implement semaphore-based parallelism limiting in executor"
+      "title": "Wire up 'r' key to open refine overlay and Esc to close it"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-26T17:58:14.710856+00:00",
+      "completedAt": null,
       "dependsOn": [
         "S1"
       ],
-      "description": "In executor.rs run_claude_for_story, wrap the entire claude process execution (spawn, stdout/stderr reading, wait) in a tokio::time::timeout of timeout_secs duration. Add timeout_secs: u64 parameter to run_claude_for_story. Thread it from execute_story (which also needs the parameter added) and from run_executor. If the timeout expires: (1) kill the child process with child.kill(), (2) log a timeout message via tx.send(BaroEvent::StoryLog) with format '[timeout] Story {story_id} killed after {timeout_secs}s', (3) return Err(format!('Story timed out after {timeout_secs}s')). The story will then retry per normal retry logic in execute_story. Also update the call to run_claude_for_story in execute_story to pass timeout_secs. Update any other callers of execute_story to pass timeout_secs as well (e.g., review fix story execution around line 700+).",
-      "durationSecs": 202,
+      "description": "In screens/review.rs, after the main review render, if app.refine_input is Some, render a centered overlay box on top of the review screen. The overlay should be a Block with title ' Refine Plan ' and borders, containing: a Paragraph showing the current input text with a blinking cursor (use app.tick_count % 10 < 5 for blink). The overlay should be roughly 60% width and 5 lines tall, centered in the screen area using ratatui Layout. Show a hint line below the input: 'Enter:send  Esc:cancel'. Use Clear widget or render a background block to make the overlay stand out. Use theme::ACCENT for the border color. Also render a 'Refining...' indicator if app.refining is true and refine_input is None. Ensure cargo build passes with zero warnings.",
+      "durationSecs": null,
       "id": "S3",
-      "passes": true,
+      "passes": false,
       "priority": 3,
       "retries": 2,
       "tests": [],
-      "title": "Implement story timeout in run_claude_for_story"
+      "title": "Render refine input overlay on review screen"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-26T17:55:55.523193+00:00",
+      "completedAt": null,
       "dependsOn": [
-        "S1"
+        "S2",
+        "S3"
       ],
-      "description": "Show the parallelism limit and timeout in the TUI execute screen header. In app.rs, add two fields to the App struct: parallel_limit: u32 and timeout_secs: u64, with defaults 0 and 600. Set these values in main.rs when creating the App (pass from CLI args). In screens/execute.rs render_header function, add two new spans to the info_line after the completed/total span: (1) 'parallel: N' or 'parallel: ∞' if 0, styled with theme::MUTED, (2) 'timeout: Ns' styled with theme::MUTED. Use the same separator pattern (│) as existing spans. Make sure to widen the header min constraint if needed to accommodate the new text.",
-      "durationSecs": 65,
+      "description": "In main.rs: (1) Add a `spawn_refiner` function similar to `spawn_planner` that takes the current plan JSON and user feedback, constructs a refinement prompt, spawns `claude --dangerously-skip-permissions --output-format json -p <prompt>`, parses the response using the existing PrdOutput struct and extract_json function, and sends RefineReady or RefineError via the channel. The refinement prompt should be: 'Here is the current plan:\\n<plan JSON>\\nThe user wants these changes: <feedback>\\nGenerate an updated plan with the same JSON schema. Keep stories the user did not mention unchanged. Output ONLY valid JSON, no markdown, no explanation.' To build the current plan JSON, serialize a PrdOutput-compatible struct from app.project, app.branch_name, app.description, and app.review_stories. (2) In the event loop, when Enter is pressed while refine_input is Some and the input is non-empty: take the feedback string, set app.refining = true, set app.refine_input = None, and call spawn_refiner. (3) Handle RefineReady: set app.refining = false, call app.show_review(stories), update app.project/branch_name/description. (4) Handle RefineError: set app.refining = false, set app.planning_error = Some(err). Ensure cargo build passes with zero warnings.",
+      "durationSecs": null,
       "id": "S4",
-      "passes": true,
+      "passes": false,
       "priority": 4,
       "retries": 2,
       "tests": [],
-      "title": "Display parallelism and timeout in TUI header"
+      "title": "Implement refinement Claude call and response handling"
     }
   ]
 }

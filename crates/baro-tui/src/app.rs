@@ -139,7 +139,6 @@ pub struct App {
     pub is_resume: bool,
 
     // Refinement
-    #[allow(dead_code)]
     pub refine_input: Option<String>,
     pub refining: bool,
 

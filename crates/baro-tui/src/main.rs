@@ -284,7 +284,21 @@ async fn run_app(
                         }
                         _ => {}
                     },
-                    Screen::Review => match key.code {
+                    Screen::Review => if app.refine_input.is_some() {
+                        // Overlay is open — handle overlay keys only
+                        match key.code {
+                            KeyCode::Esc => { app.refine_input = None; }
+                            KeyCode::Char(c) => { app.refine_input.as_mut().unwrap().push(c); }
+                            KeyCode::Backspace => { app.refine_input.as_mut().unwrap().pop(); }
+                            _ => {}
+                        }
+                    } else {
+                        match key.code {
+                        KeyCode::Char('r') => {
+                            if !app.refining {
+                                app.refine_input = Some(String::new());
+                            }
+                        }
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                         KeyCode::Enter => {
                             if app.is_resume {
@@ -345,7 +359,7 @@ async fn run_app(
                         KeyCode::Up | KeyCode::Char('k') => app.review_prev(),
                         KeyCode::Down | KeyCode::Char('j') => app.review_next(),
                         _ => {}
-                    },
+                    }},
                     Screen::Execute => match key.code {
                         KeyCode::Char('q') => return Ok(()),
                         KeyCode::Char('1') => app.global_tab = app::GlobalTab::Dashboard,
