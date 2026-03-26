@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Semaphore};
 
 use crate::app::ReviewStory;
 use crate::dag::build_dag;
@@ -800,7 +800,7 @@ pub async fn run_executor(
     prd: PrdFile,
     cwd: PathBuf,
     tx: mpsc::Sender<BaroEvent>,
-    _parallel: u32,
+    parallel: u32,
     _timeout_secs: u64,
 ) {
     let prd_path = cwd.join("prd.json");
@@ -866,6 +866,13 @@ pub async fn run_executor(
     let mut total_files_modified = 0u32;
     let mut total_commits = 0u32;
 
+    // Create semaphore for parallelism limiting (0 = unlimited)
+    let semaphore = if parallel > 0 {
+        Some(Arc::new(Semaphore::new(parallel as usize)))
+    } else {
+        None
+    };
+
     // Execute level by level
     let story_map: HashMap<&str, &PrdStory> =
         stories.iter().map(|s| (s.id.as_str(), s)).collect();
@@ -900,7 +907,13 @@ pub async fn run_executor(
             let tx = tx.clone();
             let git_mutex = Arc::clone(&git_mutex);
 
+            let semaphore = semaphore.clone();
             let handle = tokio::spawn(async move {
+                let _permit = if let Some(ref sem) = semaphore {
+                    Some(sem.acquire().await.expect("semaphore closed"))
+                } else {
+                    None
+                };
                 execute_story(&story, &cwd, &prd_path, &tx, &git_mutex).await
             });
             handles.push((story_id.clone(), handle));
