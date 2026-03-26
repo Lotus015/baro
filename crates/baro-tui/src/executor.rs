@@ -1116,29 +1116,86 @@ pub async fn run_executor(
             .sum();
 
         // Build PR body
-        let mut body = format!(
-            "## {}\n\n{}\n\n### Completed Stories\n\n",
-            current_prd.project, current_prd.description
-        );
-        for story in current_prd.user_stories.iter().filter(|s| s.passes) {
-            let duration = story
-                .duration_secs
-                .map(|d| format!(" ({}s)", d))
-                .unwrap_or_default();
+        let summary = current_prd
+            .description
+            .split('.')
+            .next()
+            .unwrap_or(&current_prd.description)
+            .trim();
+        let summary = if summary.is_empty() {
+            &current_prd.description
+        } else {
+            summary
+        };
+
+        let mut body = format!("{}\n\n", summary);
+
+        // Stories table
+        body.push_str("## Stories\n\n");
+        body.push_str("| ID | Title | Duration | Status |\n");
+        body.push_str("|:---|:------|:---------|:-------|\n");
+        for story in &current_prd.user_stories {
+            let duration_str = match story.duration_secs {
+                Some(d) if d >= 60 => format!("{}m {}s", d / 60, d % 60),
+                Some(d) => format!("{}s", d),
+                None => "–".to_string(),
+            };
+            let status = if story.passes { "Done" } else { "Skipped" };
             body.push_str(&format!(
-                "- **{}**: {}{}\n",
-                story.id, story.title, duration
+                "| {} | {} | {} | {} |\n",
+                story.id, story.title, duration_str, status
             ));
         }
+
+        // Stats section
+        let wall_time_str = if total_time_secs >= 60 {
+            format!("{}m {}s", total_time_secs / 60, total_time_secs % 60)
+        } else {
+            format!("{}s", total_time_secs)
+        };
+        let time_saved = sequential_time.saturating_sub(total_time_secs);
+        let time_saved_str = if time_saved >= 60 {
+            format!("{}m {}s", time_saved / 60, time_saved % 60)
+        } else {
+            format!("{}s", time_saved)
+        };
+        let speedup = if total_time_secs > 0 {
+            format!("{:.1}x", sequential_time as f64 / total_time_secs as f64)
+        } else {
+            "–".to_string()
+        };
+        let total_stories = current_prd.user_stories.len();
         body.push_str(&format!(
-            "\n### Stats\n\n\
-             - Files created: {}\n\
-             - Files modified: {}\n\
-             - Total time: {}s\n\
-             - Completed: {}\n\
-             - Skipped: {}\n",
-            total_files_created, total_files_modified, total_time_secs, completed, skipped
+            "\n## Stats\n\n\
+             - **Wall time:** {}\n\
+             - **Time saved:** {} (parallelism)\n\
+             - **Speedup:** {}\n\
+             - **Files created:** {}\n\
+             - **Files modified:** {}\n\
+             - **Stories:** {}/{} completed, {} skipped\n",
+            wall_time_str,
+            time_saved_str,
+            speedup,
+            total_files_created,
+            total_files_modified,
+            completed,
+            total_stories,
+            skipped
         ));
+
+        // Review section
+        body.push_str(&format!(
+            "\n## Review\n\n\
+             - **Review cycles:** {}\n\
+             - **Fixes auto-applied:** {}\n",
+            review_cycles, review_fixes_applied
+        ));
+
+        // Footer
+        body.push_str(
+            "\n---\n\nBuilt with [baro](https://www.npmjs.com/package/baro-ai) \
+             — Background Agent Runtime Orchestrator\n",
+        );
 
         let pr_output = Command::new("gh")
             .args([
