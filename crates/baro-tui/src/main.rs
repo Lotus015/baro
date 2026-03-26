@@ -52,6 +52,14 @@ struct Cli {
     /// Per-story timeout in seconds
     #[arg(long, default_value = "600")]
     timeout: u64,
+
+    /// Override model for all phases (valid: opus, sonnet, haiku)
+    #[arg(long = "model", value_parser = ["opus", "sonnet", "haiku"])]
+    model: Option<String>,
+
+    /// Disable model routing (equivalent to --model opus)
+    #[arg(long = "no-model-routing")]
+    no_model_routing: bool,
 }
 
 enum AppEvent {
@@ -86,13 +94,15 @@ Output ONLY valid JSON matching this exact schema (no markdown, no explanation, 
       "dependsOn": [],
       "retries": 2,
       "acceptance": ["testable criterion"],
-      "tests": ["npm test"]
+      "tests": ["npm test"],
+      "model": "opus"
     }
   ]
 }
 
 Rules:
 - Each story: single focused unit of work for one AI agent
+- If a story is complex enough to require the most capable model (opus with 1M context) for implementation, set its "model" field to "opus". Otherwise omit the field entirely (defaults to the routing default, typically sonnet)
 - Use dependsOn for dependencies; same-priority stories with no deps run IN PARALLEL
 - Keep stories small (15-60 min of work each)
 - Include testable acceptance criteria and test commands
@@ -166,6 +176,14 @@ async fn run_app(
         "openai" => Planner::OpenAI,
         _ => Planner::Claude,
     };
+
+    if let Some(ref model) = cli.model {
+        app.override_model = Some(model.clone());
+        app.model_routing = false;
+    } else if cli.no_model_routing {
+        app.override_model = Some("opus".to_string());
+        app.model_routing = false;
+    }
 
     let (tx, mut rx) = mpsc::channel::<AppEvent>(256);
 

@@ -45,6 +45,8 @@ pub struct PrdStory {
     pub completed_at: Option<String>,
     #[serde(rename = "durationSecs", default)]
     pub duration_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 fn default_retries() -> u32 {
@@ -781,6 +783,7 @@ async fn run_review_for_level(
                 passes: false,
                 completed_at: None,
                 duration_secs: None,
+                model: None,
             };
 
             match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, timeout_secs).await {
@@ -1295,6 +1298,7 @@ pub fn prd_from_review(
                 passes: false,
                 completed_at: None,
                 duration_secs: None,
+                model: None,
             })
             .collect(),
     }

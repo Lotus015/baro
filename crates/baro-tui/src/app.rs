@@ -146,6 +146,10 @@ pub struct App {
     pub parallel_limit: u32,
     pub timeout_secs: u64,
 
+    // Model routing
+    pub model_routing: bool,
+    pub override_model: Option<String>,
+
     // UI state
     pub global_tab: GlobalTab,
     pub selected_log_index: usize,
@@ -191,6 +195,8 @@ impl App {
             refining: false,
             parallel_limit: 0,
             timeout_secs: 600,
+            model_routing: true,
+            override_model: None,
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
             tick_count: 0,
@@ -453,5 +459,21 @@ impl App {
         } else {
             self.start_time.elapsed().as_secs()
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn model_for_phase(&self, phase: &str) -> Option<String> {
+        if let Some(ref model) = self.override_model {
+            return Some(model.clone());
+        }
+        if self.model_routing {
+            return match phase {
+                "planning" => Some("opus".to_string()),
+                "execution" => Some("sonnet".to_string()),
+                "review" => Some("haiku".to_string()),
+                _ => None,
+            };
+        }
+        None
     }
 }

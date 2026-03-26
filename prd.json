@@ -1,63 +1,96 @@
 {
-  "branchName": "fix/speedup-floor-and-single-story",
-  "description": "Floor speedup to 1.0x minimum and hide time-saved for single-story runs",
-  "project": "fix-speedup-calculation",
+  "project": "baro-model-routing",
+  "branchName": "feat-model-routing",
+  "description": "Add model routing to baro: opus for planning, sonnet for execution, haiku for review, with CLI override flags. The planner can escalate complex stories to opus for implementation.",
   "userStories": [
     {
-      "acceptance": [],
-      "completedAt": "2026-03-26T19:02:20.140597+00:00",
-      "dependsOn": [],
-      "description": "In crates/baro-tui/src/executor.rs lines 1181-1203: 1) Clamp the speedup to a minimum of 1.0 — if sequential_time/total_time_secs < 1.0, display '1.0x' instead. 2) If there is only 1 story (total_stories == 1), skip the 'Time saved' and 'Speedup' lines entirely from the PR body stats section. Keep the rest of the stats (wall time, files, stories). Ensure no unused variable warnings — remove time_saved_str and speedup variables when they are not emitted, or gate their computation behind the same condition.",
-      "durationSecs": 110,
       "id": "S1",
-      "passes": true,
       "priority": 1,
+      "title": "Add model config to App struct and CLI flags",
+      "description": "In crates/baro-tui/src/app.rs, add two new fields to the App struct: `model_routing: bool` (default true) and `override_model: Option<String>` (default None). Initialize them in App::new(). In crates/baro-tui/src/main.rs, add two new CLI flags to the Cli struct: `--model <name>` (optional, valid values: opus, sonnet, haiku) which sets override_model and disables routing, and `--no-model-routing` (bool flag) which is equivalent to --model opus. In run_app(), wire the CLI values into the App struct: if --model is set, set app.override_model = Some(value) and app.model_routing = false; if --no-model-routing is set, set app.override_model = Some(\"opus\") and app.model_routing = false. Also add a helper method on App like `fn model_for_phase(&self, phase: &str) -> Option<String>` that returns: if override_model is set, return that; if model_routing is true, return opus for \"planning\", sonnet for \"execution\", haiku for \"review\"; if model_routing is false and no override, return None (use default). Ensure cargo build passes with zero warnings.",
+      "dependsOn": [],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Fix speedup in executor.rs PR body"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
-      "acceptance": [],
-      "completedAt": "2026-03-26T19:01:19.813291+00:00",
-      "dependsOn": [],
-      "description": "In crates/baro-tui/src/screens/execute_stats.rs lines 149-185: 1) After computing multiplier, clamp it: if multiplier < 1.0, set it to 1.0. 2) If completed_count <= 1, skip the 'Saved:' line entirely (do not push any summary_line for saved time). Currently the else branch on line 175-185 shows '1.0x' — for single story, remove that line too so nothing about savings is shown. Ensure no unused variable warnings.",
-      "durationSecs": 49,
       "id": "S2",
-      "passes": true,
       "priority": 2,
-      "retries": 2,
-      "tests": [],
-      "title": "Fix speedup in execute_stats.rs stats tab"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-26T19:01:45.813571+00:00",
-      "dependsOn": [],
-      "description": "In crates/baro-tui/src/screens/execute_completion.rs lines 34-111: 1) Clamp multiplier to minimum 1.0 — if sequential_time/wall_time < 1.0, use 1.0. 2) If app.total == 1 (single story), skip the 'Time saved:' line entirely from the completion overlay. Currently lines 94-111 conditionally show either the time saved or 'Parallelism: 1.0x' — for single story, omit the entire Line::from block. Ensure no unused variable warnings (saved_secs may become unused when single story).",
-      "durationSecs": 77,
-      "id": "S3",
-      "passes": true,
-      "priority": 3,
-      "retries": 2,
-      "tests": [],
-      "title": "Fix speedup in execute_completion.rs overlay"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-26T19:03:14.437069+00:00",
+      "title": "Pass model config to planner spawn and add --model flag to claude args",
+      "description": "In crates/baro-tui/src/main.rs, modify spawn_planner() to accept model config. Use app.model_for_phase(\"planning\") to get the model. Modify run_claude_planner() to accept an optional model parameter (Option<String>). When the model is Some(name), add \"--model\" and the name to the args array passed to Command::new(\"claude\"). The claude CLI accepts `--model <name>` flag. Do the same for spawn_refiner() / its claude call — use the planning model for refinement too. Ensure cargo build passes with zero warnings.",
       "dependsOn": [
-        "S1",
-        "S2",
-        "S3"
+        "S1"
       ],
-      "description": "Run cargo build (and cargo clippy if available) across the entire workspace to verify there are zero warnings and zero errors after the changes from S1, S2, and S3. Fix any remaining warnings (unused variables, dead code, etc.) that may have been introduced.",
-      "durationSecs": 33,
-      "id": "S4",
-      "passes": true,
-      "priority": 4,
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Final cargo build zero-warnings check"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
+    },
+    {
+      "id": "S3",
+      "priority": 3,
+      "title": "Pass model config to executor and add --model flag to story execution and review agent",
+      "description": "In crates/baro-tui/src/main.rs, modify spawn_executor() to accept the model config (model_routing: bool, override_model: Option<String>). Pass it through to executor::run_executor(). In crates/baro-tui/src/executor.rs, update run_executor() signature to accept model_routing: bool and override_model: Option<String>. Add a local helper function (or inline logic) to resolve the model for a given story: (1) if override_model is Some, always use it (CLI override wins); (2) if the story's PrdStory struct has a non-None `model` field (see S3a), use that (planner-selected override); (3) if model_routing is true, use \"sonnet\" for story execution and \"haiku\" for review; (4) else None (default). Pass the resolved execution model to run_claude_for_story() — update its signature to accept model: Option<String>, and when Some, add \"--model\" and the name to the claude args array. Similarly, in run_review_for_level(), resolve the review model and add \"--model\" flag to the review claude spawn args. Also pass the execution model to execute_story() so fix stories spawned during review also get the correct model. Log the model being used: at the start of each story, emit a StoryLog with line \"[model] using <model_name>\" (or \"[model] using default\" if None). Ensure cargo build passes with zero warnings.",
+      "dependsOn": [
+        "S1"
+      ],
+      "retries": 2,
+      "acceptance": [],
+      "tests": [],
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
+    },
+    {
+      "id": "S3a",
+      "priority": 4,
+      "title": "Add per-story model field to PrdStory and update planner prompt to allow opus escalation",
+      "description": "Add an optional `model` field (Option<String>) to the PrdStory struct in the PRD data model (likely in crates/baro-tui/src/prd.rs or wherever PrdStory is defined). This field allows the planner to specify a per-story model override — for example, setting model to \"opus\" for a complex story that needs the full 1M-context model for implementation. The field defaults to None (meaning use the routing default). Update the planner prompt template to instruct the planner: \"If a story is complex enough to require the most capable model (opus with 1M context) for implementation, set its `model` field to `opus`. Otherwise leave it null/omit it.\" This way the intelligent planner (which itself runs on opus) can decide at planning time which stories need opus-level implementation versus which can use sonnet. Ensure the JSON deserialization handles the optional field gracefully (serde skip_serializing_if = Option::is_none, default). Ensure cargo build passes with zero warnings.",
+      "dependsOn": [],
+      "retries": 2,
+      "acceptance": [],
+      "tests": [],
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
+    },
+    {
+      "id": "S4",
+      "priority": 5,
+      "title": "Show active model in TUI header and completion screen",
+      "description": "In crates/baro-tui/src/screens/execute.rs, modify render_header() to add a model indicator span in the header info line after the existing spans. If app.model_routing is true and app.override_model is None, show \"model: routed\" in ACCENT color. If app.override_model is Some(name), show \"model: <name>\" in WARNING color. If model_routing is false and override_model is None, show \"model: default\" in MUTED color. Add it with a separator like the existing spans. Also check screens/execute_completion.rs — if there's a summary section, add the model info there too. Ensure cargo build passes with zero warnings.",
+      "dependsOn": [
+        "S1"
+      ],
+      "retries": 2,
+      "acceptance": [],
+      "tests": [],
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
+    },
+    {
+      "id": "S5",
+      "priority": 6,
+      "title": "Final cargo build zero-warnings check and integration validation",
+      "description": "Run cargo build on the entire workspace and fix any remaining warnings or errors. Check that all the pieces connect: CLI flags parsed -> App struct populated -> planner gets model -> planner can set per-story model field -> executor reads per-story model -> executor falls back to routing default -> review agent gets model -> TUI shows model. Verify that a story with model: \"opus\" in the PRD would cause the executor to spawn claude with --model opus for that story, overriding the default sonnet routing. Read through main.rs, app.rs, executor.rs, prd.rs, and the execute screen files to verify the full data flow is correct. Fix any unused imports, unused variables, or type mismatches. Ensure cargo build passes with zero warnings. Also verify that cargo clippy (if available) passes cleanly.",
+      "dependsOn": [
+        "S2",
+        "S3",
+        "S3a",
+        "S4"
+      ],
+      "retries": 2,
+      "acceptance": [],
+      "tests": [],
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     }
   ]
 }
