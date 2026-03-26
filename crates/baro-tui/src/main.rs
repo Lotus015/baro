@@ -133,6 +133,8 @@ struct PrdStoryOutput {
     #[serde(default)]
     #[serde(rename = "dependsOn")]
     depends_on: Vec<String>,
+    #[serde(default)]
+    model: Option<String>,
 }
 
 #[tokio::main]
@@ -205,6 +207,7 @@ async fn run_app(
                         description: s.description.clone(),
                         depends_on: s.depends_on.clone(),
                         completed: s.passes,
+                        model: s.model.clone(),
                     }).collect();
                     app.show_review(stories);
                     entered_resume = true;
@@ -512,6 +515,7 @@ fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEven
                     description: s.description,
                     depends_on: s.depends_on,
                     completed: false,
+                    model: s.model,
                 })
                 .collect();
 
@@ -610,6 +614,7 @@ async fn run_claude_planner(goal: &str, cwd: &Path, model: Option<&str>) -> Resu
             description: s.description,
             depends_on: s.depends_on,
             completed: false,
+            model: s.model,
         })
         .collect();
 
@@ -667,6 +672,7 @@ async fn run_openai_planner(goal: &str, cwd: &Path) -> Result<(Vec<ReviewStory>,
             description: s.description,
             depends_on: s.depends_on,
             completed: false,
+            model: s.model,
         })
         .collect();
 

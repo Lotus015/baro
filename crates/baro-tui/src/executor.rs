@@ -1377,7 +1377,7 @@ pub fn prd_from_review(
                 passes: false,
                 completed_at: None,
                 duration_secs: None,
-                model: None,
+                model: s.model.clone(),
             })
             .collect(),
     }

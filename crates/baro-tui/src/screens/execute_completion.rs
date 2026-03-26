@@ -157,7 +157,7 @@ pub fn render_completion(f: &mut Frame, app: &App) {
         Span::styled("  Model:          ", Style::default().fg(theme::MUTED)),
         Span::styled(
             if let Some(ref name) = app.override_model {
-                format!("{}", name)
+                name.to_string()
             } else if app.model_routing {
                 "routed".to_string()
             } else {

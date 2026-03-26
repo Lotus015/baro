@@ -33,14 +33,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T19:28:15.848501+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "In crates/baro-tui/src/main.rs, modify spawn_executor() to accept the model config (model_routing: bool, override_model: Option<String>). Pass it through to executor::run_executor(). In crates/baro-tui/src/executor.rs, update run_executor() signature to accept model_routing: bool and override_model: Option<String>. Add a local helper function (or inline logic) to resolve the model for a given story: (1) if override_model is Some, always use it (CLI override wins); (2) if the story's PrdStory struct has a non-None `model` field (see S3a), use that (planner-selected override); (3) if model_routing is true, use \"sonnet\" for story execution and \"haiku\" for review; (4) else None (default). Pass the resolved execution model to run_claude_for_story() — update its signature to accept model: Option<String>, and when Some, add \"--model\" and the name to the claude args array. Similarly, in run_review_for_level(), resolve the review model and add \"--model\" flag to the review claude spawn args. Also pass the execution model to execute_story() so fix stories spawned during review also get the correct model. Log the model being used: at the start of each story, emit a StoryLog with line \"[model] using <model_name>\" (or \"[model] using default\" if None). Ensure cargo build passes with zero warnings.",
-      "durationSecs": null,
+      "durationSecs": 310,
       "id": "S3",
-      "passes": false,
+      "passes": true,
       "priority": 3,
       "retries": 2,
       "tests": [],

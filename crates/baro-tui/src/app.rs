@@ -89,6 +89,7 @@ pub struct ReviewStory {
     pub description: String,
     pub depends_on: Vec<String>,
     pub completed: bool,
+    pub model: Option<String>,
 }
 
 pub struct App {
