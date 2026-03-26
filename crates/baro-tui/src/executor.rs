@@ -1073,6 +1073,25 @@ pub async fn run_executor(
         })
         .await;
 
+    // ─── Completion notification (best-effort) ───────────────────
+    print!("\x07"); // terminal bell
+    match std::env::consts::OS {
+        "macos" => {
+            let _ = std::process::Command::new("osascript")
+                .args([
+                    "-e",
+                    "display notification \"baro: all stories complete\" with title \"baro\"",
+                ])
+                .spawn();
+        }
+        "linux" => {
+            let _ = std::process::Command::new("notify-send")
+                .args(["baro", "all stories complete"])
+                .spawn();
+        }
+        _ => {}
+    }
+
     // ─── Finalize phase ─────────────────────────────────────────
     let _ = tx.send(BaroEvent::FinalizeStart).await;
 
