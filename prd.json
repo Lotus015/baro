@@ -1,119 +1,35 @@
 {
-  "branchName": "fix-tui-5-bugs",
-  "description": "Fix 5 TUI bugs: zombie tabs, scrollback, review logs, time saved, notification",
-  "project": "tui-bugfixes",
+  "project": "fix-token-usage-tracking",
+  "branchName": "fix/token-usage-parsing",
+  "description": "Fix incorrect token usage tracking by capturing usage from all Claude CLI stream event types",
   "userStories": [
     {
-      "acceptance": [],
-      "completedAt": "2026-03-26T20:07:30.892229+00:00",
-      "dependsOn": [],
-      "description": "In executor.rs, after execute_story returns for a fix story inside run_review_for_level (lines 859-901), emit a StoryComplete event with the fix_id and appropriate duration/file stats on success (after line 886). On failure (after line 893), also emit StoryComplete or a cleanup event so the story is removed from active_stories.\n\nKey file: crates/baro-tui/src/executor.rs lines 859-901",
-      "durationSecs": 48,
-      "id": "S1a",
-      "passes": true,
+      "id": "S1",
       "priority": 1,
+      "title": "Refactor parser to capture usage from all event types",
+      "description": "In executor.rs, refactor parse_claude_stream_line to: 1) Replace the tuple return type (Vec<String>, Option<(u64, u64)>) with a named struct ParseResult { logs: Vec<String>, tokens: Option<(u64, u64)> }. 2) In the 'assistant' match arm, also check ev.get('message').and_then(|m| m.get('usage')) for input_tokens/output_tokens and return them in tokens if found. 3) After the match block (as a fallback for any event type), check for a root-level ev.get('usage') field and extract tokens from it if present and no tokens were captured yet. This ensures usage data is captured from: result events (existing), assistant message events (new), and any other event type with root-level usage (new). 4) Update all call sites of parse_claude_stream_line in run_claude_for_story to destructure the new ParseResult struct instead of the tuple. Make sure cargo build passes with zero warnings.",
+      "dependsOn": [],
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Emit StoryComplete for fix stories in executor"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     },
     {
-      "acceptance": [],
-      "completedAt": "2026-03-26T20:06:57.574031+00:00",
-      "dependsOn": [],
-      "description": "In app.rs StoryComplete handler (lines 361-378), verify it handles fix story IDs that aren't in app.stories gracefully — the find may return None for fix stories, which is fine, but active_stories.remove(story_id) must still execute unconditionally. Ensure the handler doesn't skip the active_stories removal when the story isn't found in app.stories.\n\nKey file: crates/baro-tui/src/app.rs lines 361-378",
-      "durationSecs": 16,
-      "id": "S1b",
-      "passes": true,
-      "priority": 2,
-      "retries": 2,
-      "tests": [],
-      "title": "Ensure app.rs StoryComplete handler is robust for fix stories"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-26T20:07:03.777290+00:00",
-      "dependsOn": [],
-      "description": "In main.rs, after EnterAlternateScreen (line 146) and Clear(ClearType::All) (line 147), add Clear(ClearType::Purge) to clear the entire scrollback buffer. ClearType::All only clears the visible screen; ClearType::Purge clears the entire scrollback buffer so users cannot scroll up past the TUI.\n\nKey file: crates/baro-tui/src/main.rs lines 146-147\n\nChange line 147 from:\n  execute!(tty, Clear(ClearType::All))?;\nTo:\n  execute!(tty, Clear(ClearType::All))?;\n  execute!(tty, Clear(ClearType::Purge))?;\n\nAlso verify the import of ClearType includes Purge (it's part of crossterm::terminal::ClearType enum, no new import needed).",
-      "durationSecs": 17,
       "id": "S2",
-      "passes": true,
-      "priority": 3,
-      "retries": 2,
-      "tests": [],
-      "title": "Fix terminal scrollback not cleared"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-26T20:07:33.767060+00:00",
-      "dependsOn": [],
-      "description": "In execute_dashboard.rs render_logs function (line 136-188), review logs are only shown when active_ids.is_empty() AND app.review_in_progress is true AND review_logs is non-empty. But when the review completes (ReviewComplete sets review_in_progress=false in app.rs:440), the logs immediately disappear and the user sees 'Waiting for next story...' instead.\n\nThe fix: Change the condition at line 137 from:\n  if app.review_in_progress && !app.review_logs.is_empty() {\nTo:\n  if !app.review_logs.is_empty() {\n\nThis way review logs remain visible even after the review completes, until new stories start (which will populate active_ids and show story logs instead). The review_in_progress flag can still be used in the title to show whether review is active or done.\n\nUpdate the title to reflect status: when review_in_progress is true show spinner + 'Review Level N', when false show 'Review Level N (done)'.\n\nKey file: crates/baro-tui/src/screens/execute_dashboard.rs lines 136-188",
-      "durationSecs": 49,
-      "id": "S3",
-      "passes": true,
-      "priority": 4,
-      "retries": 2,
-      "tests": [],
-      "title": "Fix review agent logs not visible when review not in progress"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-26T20:10:50.000499+00:00",
-      "dependsOn": [],
-      "description": "In app.rs StoryComplete handler (lines 361-378), verify that duration_secs is being correctly set on matching stories. The story_id in the StoryComplete event (emitted at executor.rs:1083) must match story IDs in app.stories (initialized from incomplete stories at executor.rs:941-956). In resume mode, completed stories won't be in app.stories, so the find at app.rs:367 may return None — ensure this doesn't silently lose duration data needed for the completion screen.\n\nKey file: crates/baro-tui/src/app.rs lines 361-378",
-      "durationSecs": 246,
-      "id": "S4a",
-      "passes": true,
-      "priority": 5,
-      "retries": 2,
-      "tests": [],
-      "title": "Fix duration_secs tracking in StoryComplete handler"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-26T20:07:56.197579+00:00",
-      "dependsOn": [],
-      "description": "In execute_completion.rs (lines 34-49), make the sequential_time calculation robust. Add a fallback: if sequential_time is 0 but stories completed > 0, calculate from DoneStats or wall_time. Only show 'Time saved' line if sequential_time > wall_time (avoid showing nonsensical or empty values).\n\nKey file: crates/baro-tui/src/screens/execute_completion.rs lines 34-49",
-      "durationSecs": 70,
-      "id": "S4b",
-      "passes": true,
-      "priority": 6,
-      "retries": 2,
-      "tests": [],
-      "title": "Add fallback for time saved display in completion screen"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-26T20:07:02.563096+00:00",
-      "dependsOn": [],
-      "description": "Verify the notification code in main.rs (lines 158-178). The user wants:\n1. Notification runs AFTER LeaveAlternateScreen (line 154) - ALREADY TRUE\n2. Uses std::process::Command (not tokio) since we're outside async runtime - ALREADY TRUE (line 165)\n3. osascript command format should be: osascript -e 'display notification \"All stories complete\" with title \"baro\"'\n\nCurrent code at line 168 uses: 'display notification \"baro: all stories complete\" with title \"baro\"' - the message text should be changed to match the user's specification: 'display notification \"All stories complete\" with title \"baro\"'\n\nAlso verify that spawn() is the right approach (vs output() or status()) - spawn() is non-blocking which is fine for a notification.\n\nKey file: crates/baro-tui/src/main.rs lines 158-178",
-      "durationSecs": 21,
-      "id": "S5",
-      "passes": true,
-      "priority": 7,
-      "retries": 2,
-      "tests": [],
-      "title": "Verify and fix notification code"
-    },
-    {
-      "acceptance": [],
-      "completedAt": "2026-03-26T20:12:07.524350+00:00",
+      "priority": 2,
+      "title": "Add unit tests for token usage parsing",
+      "description": "Add a #[cfg(test)] module at the bottom of executor.rs with unit tests for parse_claude_stream_line covering all usage extraction paths: 1) Test result event with usage field returns correct tokens. 2) Test assistant event with message.usage returns correct tokens. 3) Test event with root-level usage returns correct tokens. 4) Test non-JSON line returns no tokens. 5) Test assistant event without usage returns None for tokens. 6) Test that tool_use blocks are logged correctly. 7) Test realistic multi-turn scenario where the last event has cumulative usage. Use serde_json::json! macro to construct test events. Ensure cargo test passes.",
       "dependsOn": [
-        "S1a",
-        "S1b",
-        "S2",
-        "S3",
-        "S4a",
-        "S4b",
-        "S5"
+        "S1"
       ],
-      "description": "Run cargo build on the entire workspace and ensure zero warnings. Run cargo clippy if available. Review all changes from S1-S5 together to ensure they don't conflict or introduce regressions.\n\nKey checks:\n1. cargo build --workspace produces zero warnings\n2. All event handling in app.rs is consistent (no unhandled cases)\n3. The fix story StoryComplete events from S1a don't cause issues with progress counting\n4. The review logs display from S3 doesn't cause rendering issues when transitioning between states\n5. Token tracking still works for fix stories",
-      "durationSecs": 37,
-      "id": "S6",
-      "passes": true,
-      "priority": 8,
       "retries": 2,
+      "acceptance": [],
       "tests": [],
-      "title": "Final cargo build zero-warnings check and integration validation"
+      "passes": false,
+      "completedAt": null,
+      "durationSecs": null
     }
   ]
 }

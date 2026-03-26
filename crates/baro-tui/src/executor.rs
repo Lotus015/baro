@@ -108,7 +108,12 @@ fn format_with_commas(n: u64) -> String {
     result.chars().rev().collect()
 }
 
-fn parse_claude_stream_line(line: &str, _story_id: &str) -> (Vec<String>, Option<(u64, u64)>) {
+struct ParseResult {
+    logs: Vec<String>,
+    tokens: Option<(u64, u64)>,
+}
+
+fn parse_claude_stream_line(line: &str, _story_id: &str) -> ParseResult {
     let mut logs = Vec::new();
 
     let Ok(ev) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -117,10 +122,11 @@ fn parse_claude_stream_line(line: &str, _story_id: &str) -> (Vec<String>, Option
         if !trimmed.is_empty() {
             logs.push(trimmed.to_string());
         }
-        return (logs, None);
+        return ParseResult { logs, tokens: None };
     };
 
     let ev_type = ev.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    let mut tokens: Option<(u64, u64)> = None;
 
     match ev_type {
         "assistant" => {
@@ -158,6 +164,11 @@ fn parse_claude_stream_line(line: &str, _story_id: &str) -> (Vec<String>, Option
                     }
                 }
             }
+            if let Some(usage) = ev.get("message").and_then(|m| m.get("usage")) {
+                let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                tokens = Some((input_tokens, output_tokens));
+            }
         }
         "system" => {
             if ev.get("subtype").and_then(|s| s.as_str()) == Some("init") {
@@ -177,13 +188,22 @@ fn parse_claude_stream_line(line: &str, _story_id: &str) -> (Vec<String>, Option
             if let Some(usage) = ev.get("usage") {
                 let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
                 let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                return (logs, Some((input_tokens, output_tokens)));
+                tokens = Some((input_tokens, output_tokens));
             }
         }
         _ => {}
     }
 
-    (logs, None)
+    // Fallback: check root-level usage for any event type not already captured
+    if tokens.is_none() {
+        if let Some(usage) = ev.get("usage") {
+            let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+            let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+            tokens = Some((input_tokens, output_tokens));
+        }
+    }
+
+    ParseResult { logs, tokens }
 }
 
 // ─── Model resolution helper ────────────────────────────────
@@ -360,8 +380,8 @@ async fn run_claude_for_story(
             let mut acc_input: u64 = 0;
             let mut acc_output: u64 = 0;
             while let Ok(Some(line)) = lines.next_line().await {
-                let (logs, token_usage) = parse_claude_stream_line(&line, &story_id_out);
-                for log in logs {
+                let parsed = parse_claude_stream_line(&line, &story_id_out);
+                for log in parsed.logs {
                     let _ = tx_out
                         .send(BaroEvent::StoryLog {
                             id: story_id_out.clone(),
@@ -369,7 +389,7 @@ async fn run_claude_for_story(
                         })
                         .await;
                 }
-                if let Some((input_tokens, output_tokens)) = token_usage {
+                if let Some((input_tokens, output_tokens)) = parsed.tokens {
                     acc_input += input_tokens;
                     acc_output += output_tokens;
                     let _ = tx_out
