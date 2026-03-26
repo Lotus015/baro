@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::time::timeout;
 
 use crate::app::ReviewStory;
 use crate::dag::build_dag;
@@ -174,6 +175,7 @@ async fn execute_story(
     prd_path: &Path,
     tx: &mpsc::Sender<BaroEvent>,
     git_mutex: &Mutex<()>,
+    timeout_secs: u64,
 ) -> Result<(u64, u32, u32), String> {
     let max_attempts = story.retries + 1;
 
@@ -194,7 +196,7 @@ async fn execute_story(
         let start = Instant::now();
         let prompt = build_prompt(story, cwd);
 
-        let result = run_claude_for_story(&story.id, &prompt, cwd, tx).await;
+        let result = run_claude_for_story(&story.id, &prompt, cwd, tx, timeout_secs).await;
 
         let duration_secs = start.elapsed().as_secs();
 
@@ -260,6 +262,7 @@ async fn run_claude_for_story(
     prompt: &str,
     cwd: &Path,
     tx: &mpsc::Sender<BaroEvent>,
+    timeout_secs: u64,
 ) -> Result<(), String> {
     let mut child = Command::new("claude")
         .args([
@@ -280,54 +283,75 @@ async fn run_claude_for_story(
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
 
-    let story_id_out = story_id.to_string();
-    let tx_out = tx.clone();
-    let stdout_task = tokio::spawn(async move {
-        let reader = BufReader::new(stdout);
-        let mut lines = reader.lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let logs = parse_claude_stream_line(&line, &story_id_out);
-            for log in logs {
-                let _ = tx_out
-                    .send(BaroEvent::StoryLog {
-                        id: story_id_out.clone(),
-                        line: log,
-                    })
-                    .await;
+    let story_id_owned = story_id.to_string();
+    let tx_clone = tx.clone();
+
+    let result = timeout(Duration::from_secs(timeout_secs), async {
+        let story_id_out = story_id_owned.clone();
+        let tx_out = tx_clone.clone();
+        let stdout_task = tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let logs = parse_claude_stream_line(&line, &story_id_out);
+                for log in logs {
+                    let _ = tx_out
+                        .send(BaroEvent::StoryLog {
+                            id: story_id_out.clone(),
+                            line: log,
+                        })
+                        .await;
+                }
+            }
+        });
+
+        let story_id_err = story_id_owned.clone();
+        let tx_err = tx_clone.clone();
+        let stderr_task = tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let trimmed = line.trim().to_string();
+                if !trimmed.is_empty() {
+                    let _ = tx_err
+                        .send(BaroEvent::StoryLog {
+                            id: story_id_err.clone(),
+                            line: trimmed,
+                        })
+                        .await;
+                }
+            }
+        });
+
+        let _ = stdout_task.await;
+        let _ = stderr_task.await;
+
+        child
+            .wait()
+            .await
+            .map_err(|e| format!("Failed to wait for claude: {}", e))
+    })
+    .await;
+
+    match result {
+        Ok(wait_result) => {
+            let status = wait_result?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("claude exited with code {}", status.code().unwrap_or(-1)))
             }
         }
-    });
-
-    let story_id_err = story_id.to_string();
-    let tx_err = tx.clone();
-    let stderr_task = tokio::spawn(async move {
-        let reader = BufReader::new(stderr);
-        let mut lines = reader.lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let trimmed = line.trim().to_string();
-            if !trimmed.is_empty() {
-                let _ = tx_err
-                    .send(BaroEvent::StoryLog {
-                        id: story_id_err.clone(),
-                        line: trimmed,
-                    })
-                    .await;
-            }
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: story_id.to_string(),
+                    line: format!("[timeout] Story {} killed after {}s", story_id, timeout_secs),
+                })
+                .await;
+            Err(format!("Story timed out after {}s", timeout_secs))
         }
-    });
-
-    let _ = stdout_task.await;
-    let _ = stderr_task.await;
-
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| format!("Failed to wait for claude: {}", e))?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("claude exited with code {}", status.code().unwrap_or(-1)))
     }
 }
 
@@ -475,6 +499,7 @@ async fn run_review_for_level(
     git_mutex: &Arc<Mutex<()>>,
     prd_path: &Path,
     level_index: usize,
+    timeout_secs: u64,
 ) {
     let _ = tx
         .send(BaroEvent::ReviewStart {
@@ -752,7 +777,7 @@ async fn run_review_for_level(
                 duration_secs: None,
             };
 
-            match execute_story(&fix_story, cwd, prd_path, tx, git_mutex).await {
+            match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, timeout_secs).await {
                 Ok(_) => {
                     let _ = tx
                         .send(BaroEvent::ReviewLog {
@@ -801,7 +826,7 @@ pub async fn run_executor(
     cwd: PathBuf,
     tx: mpsc::Sender<BaroEvent>,
     parallel: u32,
-    _timeout_secs: u64,
+    timeout_secs: u64,
 ) {
     let prd_path = cwd.join("prd.json");
     let stories = &prd.user_stories;
@@ -914,7 +939,7 @@ pub async fn run_executor(
                 } else {
                     None
                 };
-                execute_story(&story, &cwd, &prd_path, &tx, &git_mutex).await
+                execute_story(&story, &cwd, &prd_path, &tx, &git_mutex, timeout_secs).await
             });
             handles.push((story_id.clone(), handle));
         }
@@ -982,6 +1007,7 @@ pub async fn run_executor(
                 &git_mutex,
                 &prd_path,
                 level_index,
+                timeout_secs,
             )
             .await;
         }
