@@ -114,4 +114,14 @@ pub enum BaroEvent {
         total_time_secs: u64,
         stats: DoneStats,
     },
+
+    #[serde(rename = "notification_ready")]
+    NotificationReady,
+
+    #[serde(rename = "token_usage")]
+    TokenUsage {
+        id: String,
+        input_tokens: u64,
+        output_tokens: u64,
+    },
 }
