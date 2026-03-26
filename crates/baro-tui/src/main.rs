@@ -145,6 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     execute!(tty, EnterAlternateScreen)?;
     execute!(tty, Clear(ClearType::All))?;
+    execute!(tty, Clear(ClearType::Purge))?;
     let backend = CrosstermBackend::new(tty);
     let mut terminal = Terminal::new(backend)?;
 

@@ -134,7 +134,7 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
     let active_ids = app.active_story_ids();
 
     if active_ids.is_empty() {
-        if app.review_in_progress && !app.review_logs.is_empty() {
+        if !app.review_logs.is_empty() {
             let total_logs = app.review_logs.len();
             let inner_height = area.height.saturating_sub(2) as usize;
             let skip = total_logs.saturating_sub(inner_height);
@@ -143,11 +143,17 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
                 .map(|l| Line::from(Span::styled(l.clone(), Style::default().fg(theme::TEXT))))
                 .collect();
 
+            let title = if app.review_in_progress {
+                format!(" {} Review Level {} ", app.spinner_frame(), app.review_level)
+            } else {
+                format!(" Review Level {} (done) ", app.review_level)
+            };
+
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ratatui::style::Color::Cyan))
                 .title(Span::styled(
-                    format!(" Review Level {} ", app.review_level),
+                    title,
                     Style::default()
                         .fg(ratatui::style::Color::Cyan)
                         .add_modifier(Modifier::BOLD),
