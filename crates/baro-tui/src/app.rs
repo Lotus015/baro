@@ -369,6 +369,21 @@ impl App {
                     story.duration_secs = Some(duration_secs);
                     story.files_created = files_created;
                     story.files_modified = files_modified;
+                } else {
+                    // Resume mode: story was already complete before this run and is not in
+                    // app.stories (Init only sends incomplete stories). Push a synthetic entry
+                    // so duration_secs is preserved for the completion screen's sequential_time
+                    // calculation (execute_completion.rs sums app.stories duration_secs).
+                    self.stories.push(StoryState {
+                        id: id.clone(),
+                        title: id.clone(),
+                        depends_on: Vec::new(),
+                        status: StoryStatus::Complete,
+                        duration_secs: Some(duration_secs),
+                        error: None,
+                        files_created,
+                        files_modified,
+                    });
                 }
                 self.active_stories.remove(&id);
                 let count = self.active_stories.len();
