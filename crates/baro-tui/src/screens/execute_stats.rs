@@ -146,42 +146,34 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
         ]),
     ];
 
-    // Third line: time saved
+    // Third line: time saved (only shown for multiple stories)
     let completed_count = completed_stories.len();
-    let multiplier = if wall_time > 0 {
-        sequential_time as f64 / wall_time as f64
-    } else {
-        1.0
-    };
-    if completed_count >= 2 && multiplier > 1.0 {
-        let saved_time = sequential_time.saturating_sub(wall_time);
-        summary_lines.push(Line::from(vec![
-            Span::styled("  Saved: ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                format!("{}:{:02}", saved_time / 60, saved_time % 60),
-                Style::default()
-                    .fg(theme::SUCCESS)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" (", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                format!("{:.1}x", multiplier),
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" faster)", Style::default().fg(theme::MUTED)),
-        ]));
-    } else {
-        summary_lines.push(Line::from(vec![
-            Span::styled("  Saved: ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "1.0x",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
+    if completed_count > 1 {
+        let multiplier = if wall_time > 0 {
+            (sequential_time as f64 / wall_time as f64).max(1.0)
+        } else {
+            1.0
+        };
+        if multiplier > 1.0 {
+            let saved_time = sequential_time.saturating_sub(wall_time);
+            summary_lines.push(Line::from(vec![
+                Span::styled("  Saved: ", Style::default().fg(theme::MUTED)),
+                Span::styled(
+                    format!("{}:{:02}", saved_time / 60, saved_time % 60),
+                    Style::default()
+                        .fg(theme::SUCCESS)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" (", Style::default().fg(theme::MUTED)),
+                Span::styled(
+                    format!("{:.1}x", multiplier),
+                    Style::default()
+                        .fg(theme::ACCENT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" faster)", Style::default().fg(theme::MUTED)),
+            ]));
+        }
     }
 
     let summary = Paragraph::new(summary_lines).block(
