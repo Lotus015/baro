@@ -33,14 +33,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T17:58:14.710856+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "In executor.rs run_claude_for_story, wrap the entire claude process execution (spawn, stdout/stderr reading, wait) in a tokio::time::timeout of timeout_secs duration. Add timeout_secs: u64 parameter to run_claude_for_story. Thread it from execute_story (which also needs the parameter added) and from run_executor. If the timeout expires: (1) kill the child process with child.kill(), (2) log a timeout message via tx.send(BaroEvent::StoryLog) with format '[timeout] Story {story_id} killed after {timeout_secs}s', (3) return Err(format!('Story timed out after {timeout_secs}s')). The story will then retry per normal retry logic in execute_story. Also update the call to run_claude_for_story in execute_story to pass timeout_secs. Update any other callers of execute_story to pass timeout_secs as well (e.g., review fix story execution around line 700+).",
-      "durationSecs": null,
+      "durationSecs": 202,
       "id": "S3",
-      "passes": false,
+      "passes": true,
       "priority": 3,
       "retries": 2,
       "tests": [],
@@ -48,14 +48,14 @@
     },
     {
       "acceptance": [],
-      "completedAt": null,
+      "completedAt": "2026-03-26T17:55:55.523193+00:00",
       "dependsOn": [
         "S1"
       ],
       "description": "Show the parallelism limit and timeout in the TUI execute screen header. In app.rs, add two fields to the App struct: parallel_limit: u32 and timeout_secs: u64, with defaults 0 and 600. Set these values in main.rs when creating the App (pass from CLI args). In screens/execute.rs render_header function, add two new spans to the info_line after the completed/total span: (1) 'parallel: N' or 'parallel: ∞' if 0, styled with theme::MUTED, (2) 'timeout: Ns' styled with theme::MUTED. Use the same separator pattern (│) as existing spans. Make sure to widen the header min constraint if needed to accommodate the new text.",
-      "durationSecs": null,
+      "durationSecs": 65,
       "id": "S4",
-      "passes": false,
+      "passes": true,
       "priority": 4,
       "retries": 2,
       "tests": [],
