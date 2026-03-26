@@ -107,3 +107,7 @@ Rust binary distributed via npm. TUI built with ratatui, async execution with to
 ## License
 
 MIT
+
+---
+
+Made by [Lotus](https://github.com/Lotus015) from [JigJoy](https://jigjoy.ai) team
