@@ -1,33 +1,65 @@
 {
-  "branchName": "feat/time-saved-metric",
-  "description": "Add time saved metric showing parallel execution speedup in stats panel and completion overlay",
-  "project": "time-saved-metric",
+  "branchName": "feat/parallel-limit-and-story-timeout",
+  "description": "Add configurable parallelism (--parallel N) and story timeout (--timeout SECONDS) CLI flags with TUI display",
+  "project": "baro-parallelism-timeout",
   "userStories": [
     {
       "acceptance": [],
-      "completedAt": "2026-03-24T21:17:45.816230+00:00",
+      "completedAt": "2026-03-26T17:54:27.441990+00:00",
       "dependsOn": [],
-      "description": "In execute_stats.rs, calculate sequential_time as the sum of all completed story duration_secs values. Get wall_time from app.elapsed_secs() (or app.total_time_secs if final_stats is present). Compute saved_time = sequential_time - wall_time and multiplier = sequential_time / wall_time. Add a third Line to the summary_lines vec in render_stats_full() showing 'Saved: M:SS (X.Xx faster)' when there are 2+ completed stories and multiplier > 1.0, otherwise show '1.0x' without saved time. Use theme::SUCCESS for the saved time and theme::ACCENT for the multiplier. Ensure cargo build passes with zero warnings.",
-      "durationSecs": 101,
+      "description": "In main.rs, add two new fields to the Cli struct: `parallel` (u32, long flag, default 0 meaning unlimited) and `timeout` (u64, long flag, default 600). Pass both values through spawn_executor to run_executor. Update run_executor signature to accept parallel: u32 and timeout_secs: u64 parameters. In spawn_executor, accept and forward these values. Do NOT yet implement semaphore or timeout logic - just thread the values through. Update both call sites of spawn_executor (line 281 and 312 in main.rs) to pass the CLI values.",
+      "durationSecs": 784,
       "id": "S1",
       "passes": true,
       "priority": 1,
       "retries": 2,
       "tests": [],
-      "title": "Add time saved calculation and display in Stats panel"
+      "title": "Add --parallel and --timeout CLI flags"
     },
     {
       "acceptance": [],
-      "completedAt": "2026-03-24T21:17:06.351513+00:00",
-      "dependsOn": [],
-      "description": "In execute_completion.rs, calculate sequential_time as the sum of all completed story duration_secs values. Use total_time (from app.total_time_secs) as wall_time. Compute saved_secs = sequential_time - wall_time and multiplier = sequential_time as f64 / wall_time as f64. Add a prominent line after 'Total time' showing 'Time saved: M:SS with parallel execution (X.Xx speedup)' when stories > 1 and multiplier > 1.0, otherwise show 'Parallelism: 1.0x'. Increase box_height by 1 to accommodate. Use theme::SUCCESS with BOLD for the saved time text. Ensure cargo build passes with zero warnings.",
-      "durationSecs": 62,
+      "completedAt": "2026-03-26T17:55:45.270633+00:00",
+      "dependsOn": [
+        "S1"
+      ],
+      "description": "In executor.rs run_executor, implement configurable parallelism using tokio::sync::Semaphore. If parallel > 0, create an Arc<Semaphore> with parallel permits. In the level execution loop (around line 891-904), instead of spawning all stories immediately, acquire a semaphore permit before spawning each story's execute_story call. If parallel is 0, use no semaphore (current unlimited behavior). The semaphore should be created once before the level loop. Each story task should acquire a permit at the start and hold it until execute_story completes. Make sure to clone the Arc<Semaphore> for each spawned task.",
+      "durationSecs": 53,
       "id": "S2",
       "passes": true,
       "priority": 2,
       "retries": 2,
       "tests": [],
-      "title": "Add time saved display in completion overlay"
+      "title": "Implement semaphore-based parallelism limiting in executor"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S1"
+      ],
+      "description": "In executor.rs run_claude_for_story, wrap the entire claude process execution (spawn, stdout/stderr reading, wait) in a tokio::time::timeout of timeout_secs duration. Add timeout_secs: u64 parameter to run_claude_for_story. Thread it from execute_story (which also needs the parameter added) and from run_executor. If the timeout expires: (1) kill the child process with child.kill(), (2) log a timeout message via tx.send(BaroEvent::StoryLog) with format '[timeout] Story {story_id} killed after {timeout_secs}s', (3) return Err(format!('Story timed out after {timeout_secs}s')). The story will then retry per normal retry logic in execute_story. Also update the call to run_claude_for_story in execute_story to pass timeout_secs. Update any other callers of execute_story to pass timeout_secs as well (e.g., review fix story execution around line 700+).",
+      "durationSecs": null,
+      "id": "S3",
+      "passes": false,
+      "priority": 3,
+      "retries": 2,
+      "tests": [],
+      "title": "Implement story timeout in run_claude_for_story"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S1"
+      ],
+      "description": "Show the parallelism limit and timeout in the TUI execute screen header. In app.rs, add two fields to the App struct: parallel_limit: u32 and timeout_secs: u64, with defaults 0 and 600. Set these values in main.rs when creating the App (pass from CLI args). In screens/execute.rs render_header function, add two new spans to the info_line after the completed/total span: (1) 'parallel: N' or 'parallel: ∞' if 0, styled with theme::MUTED, (2) 'timeout: Ns' styled with theme::MUTED. Use the same separator pattern (│) as existing spans. Make sure to widen the header min constraint if needed to accommodate the new text.",
+      "durationSecs": null,
+      "id": "S4",
+      "passes": false,
+      "priority": 4,
+      "retries": 2,
+      "tests": [],
+      "title": "Display parallelism and timeout in TUI header"
     }
   ]
 }

@@ -138,6 +138,10 @@ pub struct App {
     // Resume mode
     pub is_resume: bool,
 
+    // Config
+    pub parallel_limit: u32,
+    pub timeout_secs: u64,
+
     // UI state
     pub global_tab: GlobalTab,
     pub selected_log_index: usize,
@@ -179,6 +183,8 @@ impl App {
             finalize_in_progress: false,
             pr_url: None,
             is_resume: false,
+            parallel_limit: 0,
+            timeout_secs: 600,
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
             tick_count: 0,

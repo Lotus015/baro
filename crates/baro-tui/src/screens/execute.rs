@@ -47,7 +47,7 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let header_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Min(30),
+            Constraint::Min(60),
             Constraint::Length(36),
         ])
         .split(area);
@@ -84,6 +84,20 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             format!("{}/{}", app.completed, app.total),
             Style::default().fg(theme::SUCCESS),
+        ),
+        Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
+        Span::styled(
+            if app.parallel_limit == 0 {
+                "parallel: \u{221E}".to_string()
+            } else {
+                format!("parallel: {}", app.parallel_limit)
+            },
+            Style::default().fg(theme::MUTED),
+        ),
+        Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
+        Span::styled(
+            format!("timeout: {}s", app.timeout_secs),
+            Style::default().fg(theme::MUTED),
         ),
     ]);
 

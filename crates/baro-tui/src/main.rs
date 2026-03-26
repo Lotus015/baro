@@ -157,6 +157,9 @@ async fn run_app(
     let parallel = cli.parallel;
     let timeout_secs = cli.timeout;
 
+    app.parallel_limit = cli.parallel;
+    app.timeout_secs = cli.timeout;
+
     app.planner = match cli.planner.as_str() {
         "openai" => Planner::OpenAI,
         _ => Planner::Claude,
