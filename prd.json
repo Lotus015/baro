@@ -1,96 +1,96 @@
 {
-  "project": "baro-model-routing",
   "branchName": "feat-model-routing",
   "description": "Add model routing to baro: opus for planning, sonnet for execution, haiku for review, with CLI override flags. The planner can escalate complex stories to opus for implementation.",
+  "project": "baro-model-routing",
   "userStories": [
     {
-      "id": "S1",
-      "priority": 1,
-      "title": "Add model config to App struct and CLI flags",
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [],
       "description": "In crates/baro-tui/src/app.rs, add two new fields to the App struct: `model_routing: bool` (default true) and `override_model: Option<String>` (default None). Initialize them in App::new(). In crates/baro-tui/src/main.rs, add two new CLI flags to the Cli struct: `--model <name>` (optional, valid values: opus, sonnet, haiku) which sets override_model and disables routing, and `--no-model-routing` (bool flag) which is equivalent to --model opus. In run_app(), wire the CLI values into the App struct: if --model is set, set app.override_model = Some(value) and app.model_routing = false; if --no-model-routing is set, set app.override_model = Some(\"opus\") and app.model_routing = false. Also add a helper method on App like `fn model_for_phase(&self, phase: &str) -> Option<String>` that returns: if override_model is set, return that; if model_routing is true, return opus for \"planning\", sonnet for \"execution\", haiku for \"review\"; if model_routing is false and no override, return None (use default). Ensure cargo build passes with zero warnings.",
-      "dependsOn": [],
-      "retries": 2,
-      "acceptance": [],
-      "tests": [],
+      "durationSecs": null,
+      "id": "S1",
       "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "priority": 1,
+      "retries": 2,
+      "tests": [],
+      "title": "Add model config to App struct and CLI flags"
     },
     {
-      "id": "S2",
-      "priority": 2,
-      "title": "Pass model config to planner spawn and add --model flag to claude args",
+      "acceptance": [],
+      "completedAt": null,
+      "dependsOn": [
+        "S1"
+      ],
       "description": "In crates/baro-tui/src/main.rs, modify spawn_planner() to accept model config. Use app.model_for_phase(\"planning\") to get the model. Modify run_claude_planner() to accept an optional model parameter (Option<String>). When the model is Some(name), add \"--model\" and the name to the args array passed to Command::new(\"claude\"). The claude CLI accepts `--model <name>` flag. Do the same for spawn_refiner() / its claude call — use the planning model for refinement too. Ensure cargo build passes with zero warnings.",
+      "durationSecs": null,
+      "id": "S2",
+      "passes": false,
+      "priority": 2,
+      "retries": 2,
+      "tests": [],
+      "title": "Pass model config to planner spawn and add --model flag to claude args"
+    },
+    {
+      "acceptance": [],
+      "completedAt": null,
       "dependsOn": [
         "S1"
       ],
-      "retries": 2,
-      "acceptance": [],
-      "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
-    },
-    {
-      "id": "S3",
-      "priority": 3,
-      "title": "Pass model config to executor and add --model flag to story execution and review agent",
       "description": "In crates/baro-tui/src/main.rs, modify spawn_executor() to accept the model config (model_routing: bool, override_model: Option<String>). Pass it through to executor::run_executor(). In crates/baro-tui/src/executor.rs, update run_executor() signature to accept model_routing: bool and override_model: Option<String>. Add a local helper function (or inline logic) to resolve the model for a given story: (1) if override_model is Some, always use it (CLI override wins); (2) if the story's PrdStory struct has a non-None `model` field (see S3a), use that (planner-selected override); (3) if model_routing is true, use \"sonnet\" for story execution and \"haiku\" for review; (4) else None (default). Pass the resolved execution model to run_claude_for_story() — update its signature to accept model: Option<String>, and when Some, add \"--model\" and the name to the claude args array. Similarly, in run_review_for_level(), resolve the review model and add \"--model\" flag to the review claude spawn args. Also pass the execution model to execute_story() so fix stories spawned during review also get the correct model. Log the model being used: at the start of each story, emit a StoryLog with line \"[model] using <model_name>\" (or \"[model] using default\" if None). Ensure cargo build passes with zero warnings.",
-      "dependsOn": [
-        "S1"
-      ],
-      "retries": 2,
-      "acceptance": [],
-      "tests": [],
+      "durationSecs": null,
+      "id": "S3",
       "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "priority": 3,
+      "retries": 2,
+      "tests": [],
+      "title": "Pass model config to executor and add --model flag to story execution and review agent"
     },
     {
-      "id": "S3a",
-      "priority": 4,
-      "title": "Add per-story model field to PrdStory and update planner prompt to allow opus escalation",
-      "description": "Add an optional `model` field (Option<String>) to the PrdStory struct in the PRD data model (likely in crates/baro-tui/src/prd.rs or wherever PrdStory is defined). This field allows the planner to specify a per-story model override — for example, setting model to \"opus\" for a complex story that needs the full 1M-context model for implementation. The field defaults to None (meaning use the routing default). Update the planner prompt template to instruct the planner: \"If a story is complex enough to require the most capable model (opus with 1M context) for implementation, set its `model` field to `opus`. Otherwise leave it null/omit it.\" This way the intelligent planner (which itself runs on opus) can decide at planning time which stories need opus-level implementation versus which can use sonnet. Ensure the JSON deserialization handles the optional field gracefully (serde skip_serializing_if = Option::is_none, default). Ensure cargo build passes with zero warnings.",
+      "acceptance": [],
+      "completedAt": "2026-03-26T19:22:20.980081+00:00",
       "dependsOn": [],
+      "description": "Add an optional `model` field (Option<String>) to the PrdStory struct in the PRD data model (likely in crates/baro-tui/src/prd.rs or wherever PrdStory is defined). This field allows the planner to specify a per-story model override — for example, setting model to \"opus\" for a complex story that needs the full 1M-context model for implementation. The field defaults to None (meaning use the routing default). Update the planner prompt template to instruct the planner: \"If a story is complex enough to require the most capable model (opus with 1M context) for implementation, set its `model` field to `opus`. Otherwise leave it null/omit it.\" This way the intelligent planner (which itself runs on opus) can decide at planning time which stories need opus-level implementation versus which can use sonnet. Ensure the JSON deserialization handles the optional field gracefully (serde skip_serializing_if = Option::is_none, default). Ensure cargo build passes with zero warnings.",
+      "durationSecs": 93,
+      "id": "S3a",
+      "passes": true,
+      "priority": 4,
       "retries": 2,
-      "acceptance": [],
       "tests": [],
-      "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "title": "Add per-story model field to PrdStory and update planner prompt to allow opus escalation"
     },
     {
-      "id": "S4",
-      "priority": 5,
-      "title": "Show active model in TUI header and completion screen",
-      "description": "In crates/baro-tui/src/screens/execute.rs, modify render_header() to add a model indicator span in the header info line after the existing spans. If app.model_routing is true and app.override_model is None, show \"model: routed\" in ACCENT color. If app.override_model is Some(name), show \"model: <name>\" in WARNING color. If model_routing is false and override_model is None, show \"model: default\" in MUTED color. Add it with a separator like the existing spans. Also check screens/execute_completion.rs — if there's a summary section, add the model info there too. Ensure cargo build passes with zero warnings.",
+      "acceptance": [],
+      "completedAt": null,
       "dependsOn": [
         "S1"
       ],
-      "retries": 2,
-      "acceptance": [],
-      "tests": [],
+      "description": "In crates/baro-tui/src/screens/execute.rs, modify render_header() to add a model indicator span in the header info line after the existing spans. If app.model_routing is true and app.override_model is None, show \"model: routed\" in ACCENT color. If app.override_model is Some(name), show \"model: <name>\" in WARNING color. If model_routing is false and override_model is None, show \"model: default\" in MUTED color. Add it with a separator like the existing spans. Also check screens/execute_completion.rs — if there's a summary section, add the model info there too. Ensure cargo build passes with zero warnings.",
+      "durationSecs": null,
+      "id": "S4",
       "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "priority": 5,
+      "retries": 2,
+      "tests": [],
+      "title": "Show active model in TUI header and completion screen"
     },
     {
-      "id": "S5",
-      "priority": 6,
-      "title": "Final cargo build zero-warnings check and integration validation",
-      "description": "Run cargo build on the entire workspace and fix any remaining warnings or errors. Check that all the pieces connect: CLI flags parsed -> App struct populated -> planner gets model -> planner can set per-story model field -> executor reads per-story model -> executor falls back to routing default -> review agent gets model -> TUI shows model. Verify that a story with model: \"opus\" in the PRD would cause the executor to spawn claude with --model opus for that story, overriding the default sonnet routing. Read through main.rs, app.rs, executor.rs, prd.rs, and the execute screen files to verify the full data flow is correct. Fix any unused imports, unused variables, or type mismatches. Ensure cargo build passes with zero warnings. Also verify that cargo clippy (if available) passes cleanly.",
+      "acceptance": [],
+      "completedAt": null,
       "dependsOn": [
         "S2",
         "S3",
         "S3a",
         "S4"
       ],
-      "retries": 2,
-      "acceptance": [],
-      "tests": [],
+      "description": "Run cargo build on the entire workspace and fix any remaining warnings or errors. Check that all the pieces connect: CLI flags parsed -> App struct populated -> planner gets model -> planner can set per-story model field -> executor reads per-story model -> executor falls back to routing default -> review agent gets model -> TUI shows model. Verify that a story with model: \"opus\" in the PRD would cause the executor to spawn claude with --model opus for that story, overriding the default sonnet routing. Read through main.rs, app.rs, executor.rs, prd.rs, and the execute screen files to verify the full data flow is correct. Fix any unused imports, unused variables, or type mismatches. Ensure cargo build passes with zero warnings. Also verify that cargo clippy (if available) passes cleanly.",
+      "durationSecs": null,
+      "id": "S5",
       "passes": false,
-      "completedAt": null,
-      "durationSecs": null
+      "priority": 6,
+      "retries": 2,
+      "tests": [],
+      "title": "Final cargo build zero-warnings check and integration validation"
     }
   ]
 }
