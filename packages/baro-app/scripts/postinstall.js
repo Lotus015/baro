@@ -12,7 +12,7 @@ import * as https from "https"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PACKAGE_ROOT = path.resolve(__dirname, "..")
 const BIN_DIR = path.join(PACKAGE_ROOT, "bin")
-const BINARY_NAME = "baro"
+const BINARY_NAME = process.platform === "win32" ? "baro.exe" : "baro"
 const REPO = "Lotus015/baro"
 
 function getPlatformKey() {

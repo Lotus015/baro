@@ -71,7 +71,7 @@ baro --cwd ~/projects/myapp "Add REST API"
 - **Configurable parallelism** — `--parallel N` to limit concurrent story execution
 - **Story timeout** — `--timeout SECONDS` kills stuck agents (default: 10 minutes)
 - **Time saved** — shows parallel speedup vs sequential execution
-- **System notifications** — terminal bell + OS notification (macOS/Linux) when done
+- **System notifications** — terminal bell + OS notification (macOS/Linux/Windows) when done
 - **Retry logic** — failed stories retry automatically (configurable per story)
 
 ## Options
@@ -96,9 +96,11 @@ Options:
 ## Requirements
 
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) installed and authenticated
-- macOS (arm64/x64) or Linux (x64/arm64)
+- macOS (arm64/x64), Linux (x64/arm64), or Windows (x64)
 - Node.js 18+ (only if using `--planner openai`)
 - `gh` CLI (optional, for automatic PR creation)
+
+> **Windows note:** Windows 10+ is required. For best TUI experience, use [Windows Terminal](https://aka.ms/terminal) or another modern terminal emulator.
 
 ## Architecture
 
