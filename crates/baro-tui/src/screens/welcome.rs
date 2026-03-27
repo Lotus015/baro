@@ -289,8 +289,9 @@ pub fn render(f: &mut Frame, app: &App) {
     f.render_widget(help, chunks[9]);
 
     // ── Version ──
+    let version_str = format!("v{}", env!("CARGO_PKG_VERSION"));
     let version = Paragraph::new(Line::from(Span::styled(
-        "v0.3.8",
+        version_str,
         Style::default().fg(theme::MUTED),
     )))
     .alignment(Alignment::Center);
