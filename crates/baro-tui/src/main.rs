@@ -7,7 +7,6 @@ mod screens;
 mod theme;
 mod ui;
 
-use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -72,8 +71,19 @@ enum AppEvent {
     Tick,
 }
 
-fn open_tty() -> io::Result<std::fs::File> {
-    OpenOptions::new().read(true).write(true).open("/dev/tty")
+fn open_terminal_writer() -> io::Result<Box<dyn Write>> {
+    #[cfg(unix)]
+    {
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")?;
+        Ok(Box::new(f))
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(Box::new(io::stdout()))
+    }
 }
 
 const CLAUDE_PLANNER_PROMPT: &str = r#"You are an expert software architect. Break down the user's project goal into concrete user stories that form a dependency DAG.
@@ -141,12 +151,12 @@ struct PrdStoryOutput {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    let mut tty = open_tty()?;
+    let mut writer = open_terminal_writer()?;
     enable_raw_mode()?;
-    execute!(tty, EnterAlternateScreen)?;
-    execute!(tty, Clear(ClearType::All))?;
-    execute!(tty, Clear(ClearType::Purge))?;
-    let backend = CrosstermBackend::new(tty);
+    execute!(writer, EnterAlternateScreen)?;
+    execute!(writer, Clear(ClearType::All))?;
+    execute!(writer, Clear(ClearType::Purge))?;
+    let backend = CrosstermBackend::new(writer);
     let mut terminal = Terminal::new(backend)?;
 
     let result = run_app(&mut terminal, cli).await;
@@ -164,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<std::fs::File>>,
+    terminal: &mut Terminal<CrosstermBackend<Box<dyn Write>>>,
     cli: Cli,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
