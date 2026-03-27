@@ -68,8 +68,16 @@ fn build_prompt(story: &PrdStory, cwd: &Path) -> String {
             "ACCEPTANCE CRITERIA:",
             "ACCEPTANCE_CRITERIA",
             "",
+            "IMPORTANT: Before committing, you MUST verify the project builds successfully:",
+            "- If Cargo.toml exists: run cargo build and fix any errors or warnings",
+            "- If package.json exists: run npm run build (if build script exists) and fix errors",
+            "- If go.mod exists: run go build ./... and fix errors",
+            "- If Makefile exists: run make and fix errors",
+            "- Fix ALL compiler warnings, not just errors",
+            "- Do NOT use #[allow(dead_code)] or similar suppressions - fix the root cause",
+            "",
             "Run tests: TEST_COMMANDS",
-            "If tests pass, commit: git add . && git commit -m \"feat(STORY_ID): STORY_TITLE\"",
+            "If build passes and tests pass, commit: git add . && git commit -m \"feat(STORY_ID): STORY_TITLE\"",
         ]
         .join("\n")
     };
