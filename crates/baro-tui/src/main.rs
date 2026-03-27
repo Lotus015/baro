@@ -269,6 +269,11 @@ async fn run_app(
                                 .args(["baro", "All stories complete"])
                                 .spawn();
                         }
+                        "windows" => {
+                            let _ = std::process::Command::new("powershell")
+                                .args(["-Command", "[console]::beep(1000,500)"])
+                                .spawn();
+                        }
                         _ => {}
                     }
                 }
