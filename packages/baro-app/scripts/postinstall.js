@@ -24,6 +24,7 @@ function getPlatformKey() {
         "darwin-x64": "darwin-x64",
         "linux-x64": "linux-x64",
         "linux-arm64": "linux-arm64",
+        "win32-x64": "windows-x64",
     }
 
     const key = `${platform}-${arch}`
@@ -67,7 +68,10 @@ async function main() {
     const platformKey = getPlatformKey()
     const version = getVersion()
 
-    const url = `https://github.com/${REPO}/releases/download/v${version}/${BINARY_NAME}-${platformKey}`
+    const artifactName = process.platform === "win32"
+        ? `baro-${platformKey}.exe`
+        : `${BINARY_NAME}-${platformKey}`
+    const url = `https://github.com/${REPO}/releases/download/v${version}/${artifactName}`
 
     console.log(`Downloading baro for ${platformKey}...`)
 
@@ -75,7 +79,9 @@ async function main() {
 
     try {
         await download(url, binaryPath)
-        fs.chmodSync(binaryPath, 0o755)
+        if (process.platform !== "win32") {
+            fs.chmodSync(binaryPath, 0o755)
+        }
         console.log(`baro installed successfully`)
     } catch (err) {
         console.warn(`Warning: Could not download baro: ${err.message}`)
