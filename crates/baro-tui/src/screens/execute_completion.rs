@@ -31,31 +31,51 @@ pub fn render_completion(f: &mut Frame, app: &App) {
         .map(|s| s.files_modified)
         .unwrap_or_else(|| app.stories.iter().map(|s| s.files_modified).sum());
 
-    let wall_time = app.total_time_secs;
-    let sequential_time: u64 = {
-        let sum: u64 = app
-            .stories
-            .iter()
-            .filter_map(|s| s.duration_secs)
-            .sum();
-        // Fallback: if no story durations were recorded but stories did complete,
-        // use wall_time so the display condition (sequential_time > wall_time) is false
-        // and we avoid showing nonsensical "Time saved" values.
-        if sum == 0 && completed > 0 {
-            wall_time
-        } else {
-            sum
+    // Calculate time saved using DAG levels:
+    // For each level, sequential = sum of all story durations, parallel = max story duration
+    // Time saved = sum of (sequential - parallel) per level
+    let (saved_secs, sequential_time) = {
+        let mut total_sequential = 0u64;
+        let mut total_parallel = 0u64;
+
+        for level in &app.dag_levels {
+            let mut level_sum = 0u64;
+            let mut level_max = 0u64;
+            for story_id in level {
+                if let Some(story) = app.stories.iter().find(|s| s.id == *story_id) {
+                    if let Some(dur) = story.duration_secs {
+                        level_sum += dur;
+                        level_max = level_max.max(dur);
+                    }
+                }
+            }
+            total_sequential += level_sum;
+            total_parallel += level_max;
         }
+
+        // Also count fix stories not in original DAG
+        for story in &app.stories {
+            if story.id.contains("-fix") {
+                if let Some(dur) = story.duration_secs {
+                    total_sequential += dur;
+                    total_parallel += dur; // fix stories run sequentially
+                }
+            }
+        }
+
+        let saved = total_sequential.saturating_sub(total_parallel);
+        (saved, total_sequential)
     };
-    let multiplier = if wall_time > 0 {
-        (sequential_time as f64 / wall_time as f64).max(1.0)
+
+    let multiplier = if sequential_time > 0 && saved_secs > 0 {
+        let parallel_time = sequential_time.saturating_sub(saved_secs);
+        if parallel_time > 0 {
+            sequential_time as f64 / parallel_time as f64
+        } else {
+            1.0
+        }
     } else {
         1.0
-    };
-    let saved_secs = if sequential_time > wall_time {
-        sequential_time.saturating_sub(wall_time)
-    } else {
-        0
     };
 
     let mut lines = vec![
@@ -107,7 +127,7 @@ pub fn render_completion(f: &mut Frame, app: &App) {
         ]),
     ];
 
-    if sequential_time > wall_time {
+    if saved_secs > 0 {
         lines.push(Line::from(vec![
             Span::styled("  Time saved:     ", Style::default().fg(theme::MUTED)),
             Span::styled(

@@ -1267,11 +1267,30 @@ pub async fn run_executor(
             .ok()?;
         let current_prd: PrdFile = serde_json::from_str(&prd_data).ok()?;
 
-        let sequential_time: u64 = current_prd
-            .user_stories
-            .iter()
-            .filter_map(|s| s.duration_secs)
-            .sum();
+        // Calculate per-level parallelism gain using DAG
+        let dag_levels = match crate::dag::build_dag(&current_prd.user_stories) {
+            Ok(levels) => levels,
+            Err(_) => Vec::new(),
+        };
+        let (level_saved, sequential_time) = {
+            let mut tseq = 0u64;
+            let mut tpar = 0u64;
+            for level in &dag_levels {
+                let mut lsum = 0u64;
+                let mut lmax = 0u64;
+                for sid in &level.story_ids {
+                    if let Some(s) = current_prd.user_stories.iter().find(|s| s.id == *sid) {
+                        if let Some(d) = s.duration_secs {
+                            lsum += d;
+                            lmax = lmax.max(d);
+                        }
+                    }
+                }
+                tseq += lsum;
+                tpar += lmax;
+            }
+            (tseq.saturating_sub(tpar), tseq)
+        };
 
         // Build PR body
         let summary = current_prd
@@ -1311,24 +1330,22 @@ pub async fn run_executor(
         } else {
             format!("{}s", total_time_secs)
         };
-        let total_stories = current_prd.user_stories.len();
-        let parallelism_stats = if total_stories > 1 {
-            let time_saved = sequential_time.saturating_sub(total_time_secs);
-            let time_saved_str = if time_saved >= 60 {
-                format!("{}m {}s", time_saved / 60, time_saved % 60)
+        let parallelism_stats = if level_saved > 0 {
+            let time_saved_str = if level_saved >= 60 {
+                format!("{}m {}s", level_saved / 60, level_saved % 60)
             } else {
-                format!("{}s", time_saved)
+                format!("{}s", level_saved)
             };
-            let raw_speedup = if total_time_secs > 0 {
-                sequential_time as f64 / total_time_secs as f64
+            let parallel_time = sequential_time.saturating_sub(level_saved);
+            let speedup = if parallel_time > 0 {
+                sequential_time as f64 / parallel_time as f64
             } else {
                 1.0
             };
-            let clamped_speedup = if raw_speedup < 1.0 { 1.0 } else { raw_speedup };
             format!(
                 "- **Time saved:** {} (parallelism)\n\
                  - **Speedup:** {:.1}x\n",
-                time_saved_str, clamped_speedup
+                time_saved_str, speedup
             )
         } else {
             String::new()
@@ -1348,7 +1365,7 @@ pub async fn run_executor(
             format_with_commas(total_input_tokens),
             format_with_commas(total_output_tokens),
             completed,
-            total_stories,
+            current_prd.user_stories.len(),
             skipped
         ));
 

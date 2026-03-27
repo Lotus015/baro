@@ -60,13 +60,26 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
         result.chars().rev().collect()
     };
 
-    // -- Time saved calculation --
-    let sequential_time: u64 = completed_stories
-        .iter()
-        .filter_map(|s| s.duration_secs)
-        .sum();
-    let wall_time = app.elapsed_secs();
-
+    // -- Time saved calculation (per-level parallelism gain) --
+    let (level_saved, sequential_time) = {
+        let mut total_seq = 0u64;
+        let mut total_par = 0u64;
+        for level in &app.dag_levels {
+            let mut lsum = 0u64;
+            let mut lmax = 0u64;
+            for sid in level {
+                if let Some(s) = app.stories.iter().find(|s| s.id == *sid) {
+                    if let Some(d) = s.duration_secs {
+                        lsum += d;
+                        lmax = lmax.max(d);
+                    }
+                }
+            }
+            total_seq += lsum;
+            total_par += lmax;
+        }
+        (total_seq.saturating_sub(total_par), total_seq)
+    };
     // -- Summary --
     let mut summary_lines = vec![
         Line::from(vec![
@@ -178,34 +191,31 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    // Third line: time saved (only shown for multiple stories)
-    let completed_count = completed_stories.len();
-    if completed_count > 1 {
-        let multiplier = if wall_time > 0 {
-            (sequential_time as f64 / wall_time as f64).max(1.0)
+    // Third line: time saved from parallelism (per-level gain)
+    if level_saved > 0 {
+        let parallel_time = sequential_time.saturating_sub(level_saved);
+        let multiplier = if parallel_time > 0 {
+            sequential_time as f64 / parallel_time as f64
         } else {
             1.0
         };
-        if multiplier > 1.0 {
-            let saved_time = sequential_time.saturating_sub(wall_time);
-            summary_lines.push(Line::from(vec![
-                Span::styled("  Saved: ", Style::default().fg(theme::MUTED)),
-                Span::styled(
-                    format!("{}:{:02}", saved_time / 60, saved_time % 60),
-                    Style::default()
-                        .fg(theme::SUCCESS)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" (", Style::default().fg(theme::MUTED)),
-                Span::styled(
-                    format!("{:.1}x", multiplier),
-                    Style::default()
-                        .fg(theme::ACCENT)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" faster)", Style::default().fg(theme::MUTED)),
-            ]));
-        }
+        summary_lines.push(Line::from(vec![
+            Span::styled("  Saved: ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{}:{:02}", level_saved / 60, level_saved % 60),
+                Style::default()
+                    .fg(theme::SUCCESS)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" (", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{:.1}x", multiplier),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" faster)", Style::default().fg(theme::MUTED)),
+        ]));
     }
 
     let summary = Paragraph::new(summary_lines).block(
