@@ -24,6 +24,9 @@ jobs:
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             artifact: baro-linux-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: baro-windows-x64.exe
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -45,8 +48,13 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
-      - name: Rename binary
+      - name: Rename binary (Unix)
+        if: runner.os != 'Windows'
         run: cp target/${{ matrix.target }}/release/baro ${{ matrix.artifact }}
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: cp target/${{ matrix.target }}/release/baro.exe ${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
