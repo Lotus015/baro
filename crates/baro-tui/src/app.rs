@@ -416,36 +416,6 @@ impl App {
         }
     }
 
-    pub fn story_list_scroll_up(&mut self) {
-        let i = self.story_list_state.selected().unwrap_or(0);
-        self.story_list_state.select(Some(i.saturating_sub(1)));
-    }
-
-    pub fn story_list_scroll_down(&mut self, item_count: usize) {
-        let i = self.story_list_state.selected().unwrap_or(0);
-        let next = if item_count == 0 { 0 } else { (i + 1).min(item_count - 1) };
-        self.story_list_state.select(Some(next));
-    }
-
-    pub fn story_list_item_count(&self) -> usize {
-        if self.dag_levels.is_empty() {
-            self.stories.len()
-        } else {
-            let mut count = 0;
-            for (i, level) in self.dag_levels.iter().enumerate() {
-                count += 1; // level header
-                count += level.len(); // stories in level
-                if self.review_in_progress && self.review_level == i {
-                    count += 1; // review spinner
-                }
-                if i < self.dag_levels.len() - 1 {
-                    count += 1; // separator
-                }
-            }
-            count
-        }
-    }
-
     pub fn auto_scroll_to_running(&mut self) {
         let mut index = 0;
         if self.dag_levels.is_empty() {

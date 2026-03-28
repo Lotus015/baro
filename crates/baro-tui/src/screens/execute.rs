@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Tabs},
+    widgets::{Block, Borders, Gauge, Paragraph},
     Frame,
 };
 
@@ -47,13 +47,12 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let header_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Min(60),
-            Constraint::Min(40),
+            Constraint::Min(20),
+            Constraint::Length(28),
         ])
         .split(area);
 
     let elapsed = app.elapsed_secs();
-    let active_count = app.active_stories.len();
 
     let info_line = Line::from(vec![
         Span::styled(
@@ -67,56 +66,13 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
         Span::styled(
-            &app.branch_name,
-            Style::default().fg(theme::MUTED),
-        ),
-        Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
-        Span::styled(
-            format!("{} active", active_count),
-            Style::default().fg(theme::WARNING),
-        ),
-        Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
-        Span::styled(
-            format!("{:02}:{:02}", elapsed / 60, elapsed % 60),
-            Style::default().fg(theme::MUTED),
-        ),
-        Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
-        Span::styled(
             format!("{}/{}", app.completed, app.total),
             Style::default().fg(theme::SUCCESS),
         ),
         Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
         Span::styled(
-            if app.parallel_limit == 0 {
-                "parallel: \u{221E}".to_string()
-            } else {
-                format!("parallel: {}", app.parallel_limit)
-            },
+            format!("{:02}:{:02}", elapsed / 60, elapsed % 60),
             Style::default().fg(theme::MUTED),
-        ),
-        Span::styled(" \u{2502} ", Style::default().fg(theme::BORDER)),
-        Span::styled(
-            format!("timeout: {}s", app.timeout_secs),
-            Style::default().fg(theme::MUTED),
-        ),
-        Span::styled(" │ ", Style::default().fg(theme::BORDER)),
-        Span::styled(
-            if let Some(ref name) = app.override_model {
-                format!("model: {}", name)
-            } else if app.model_routing {
-                "model: routed".to_string()
-            } else {
-                "model: default".to_string()
-            },
-            Style::default().fg(
-                if app.override_model.is_some() {
-                    theme::WARNING
-                } else if app.model_routing {
-                    theme::ACCENT
-                } else {
-                    theme::MUTED
-                },
-            ),
         ),
     ]);
 
@@ -127,25 +83,41 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     );
     f.render_widget(info, header_chunks[0]);
 
-    let tab_titles = vec![
-        Span::styled(" 1:Dashboard ", Style::default()),
-        Span::styled(" 2:DAG ", Style::default()),
-        Span::styled(" 3:Stats ", Style::default()),
-    ];
+    let active_tab = app.global_tab.index();
+    let tab_line = Line::from(vec![
+        Span::styled(
+            "1:Dashboard",
+            if active_tab == 0 {
+                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::MUTED)
+            },
+        ),
+        Span::raw("  "),
+        Span::styled(
+            "2:DAG",
+            if active_tab == 1 {
+                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::MUTED)
+            },
+        ),
+        Span::raw("  "),
+        Span::styled(
+            "3:Stats",
+            if active_tab == 2 {
+                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::MUTED)
+            },
+        ),
+    ]);
 
-    let tabs = Tabs::new(tab_titles)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::BORDER)),
-        )
-        .select(app.global_tab.index())
-        .style(Style::default().fg(theme::MUTED))
-        .highlight_style(
-            Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
-        )
-        .divider(Span::styled("\u{2502}", Style::default().fg(theme::BORDER)));
-
+    let tabs = Paragraph::new(tab_line).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::BORDER)),
+    );
     f.render_widget(tabs, header_chunks[1]);
 }
 
@@ -201,7 +173,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             elapsed % 60,
         )
     } else {
-        " 1/2/3:tabs | Tab/Shift+Tab:logs | PgUp/PgDn:scroll log | q:quit".to_string()
+        " 1/2/3:tabs | Tab/Shift+Tab:logs | \u{2191}\u{2193}:scroll | q:quit".to_string()
     };
 
     let footer = Paragraph::new(Span::styled(msg, Style::default().fg(theme::MUTED)));
