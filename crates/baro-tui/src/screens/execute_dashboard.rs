@@ -70,6 +70,7 @@ fn render_story_list(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
+    let item_count = items.len();
     let list = List::new(items)
         .block(
             Block::default()
@@ -86,6 +87,17 @@ fn render_story_list(f: &mut Frame, app: &mut App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         );
     f.render_stateful_widget(list, chunks[0], &mut app.story_list_state);
+
+    // Story list scrollbar
+    let inner_height = chunks[0].height.saturating_sub(2) as usize;
+    if item_count > inner_height {
+        let position = app.story_list_state.selected().unwrap_or(0);
+        let mut scrollbar_state =
+            ScrollbarState::new(item_count.saturating_sub(inner_height)).position(position);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(theme::MUTED));
+        f.render_stateful_widget(scrollbar, chunks[0], &mut scrollbar_state);
+    }
 
     // Stats area: wall time + token counter
     let elapsed = app.total_time_secs;
