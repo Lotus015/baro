@@ -68,6 +68,18 @@ struct StoryExecConfig<'a> {
     context: Option<&'a str>,
 }
 
+/// Shared parameters threaded through DAG-level execution helpers.
+struct DagExecParams<'a> {
+    cwd: &'a Path,
+    prd_path: &'a Path,
+    tx: &'a mpsc::Sender<BaroEvent>,
+    git_mutex: &'a Arc<Mutex<()>>,
+    timeout_secs: u64,
+    model_routing: bool,
+    override_model: &'a Option<String>,
+    context: Option<&'a str>,
+}
+
 // ─── Story prompt builder ───────────────────────────────────
 
 fn build_prompt(story: &PrdStory, cwd: &Path, context: Option<&str>) -> String {
@@ -621,18 +633,11 @@ async fn run_single_review_cycle(
 async fn apply_review_fixes(
     fixes: &[ReviewFix],
     level_index: usize,
-    cwd: &Path,
-    prd_path: &Path,
-    tx: &mpsc::Sender<BaroEvent>,
-    git_mutex: &Arc<Mutex<()>>,
-    timeout_secs: u64,
-    model_routing: bool,
-    override_model: &Option<String>,
-    context: Option<&str>,
+    params: &DagExecParams<'_>,
 ) {
     for (i, fix) in fixes.iter().enumerate() {
         let fix_id = format!("S{}-fix{}", level_index, i + 1);
-        let _ = tx
+        let _ = params.tx
             .send(BaroEvent::ReviewLog {
                 line: format!("Executing fix: {} - {}", fix_id, fix.title),
             })
@@ -653,17 +658,17 @@ async fn apply_review_fixes(
             model: None,
         };
 
-        let fix_model = resolve_model(override_model, &None, model_routing, "execute");
-        match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, StoryExecConfig { timeout_secs, model: fix_model, context })
+        let fix_model = resolve_model(params.override_model, &None, params.model_routing, "execute");
+        match execute_story(&fix_story, params.cwd, params.prd_path, params.tx, params.git_mutex, StoryExecConfig { timeout_secs: params.timeout_secs, model: fix_model, context: params.context })
             .await
         {
             Ok((duration_secs, files_created, files_modified, _, _)) => {
-                let _ = tx
+                let _ = params.tx
                     .send(BaroEvent::ReviewLog {
                         line: format!("Fix {} completed", fix_id),
                     })
                     .await;
-                let _ = tx
+                let _ = params.tx
                     .send(BaroEvent::StoryComplete {
                         id: fix_id.clone(),
                         duration_secs,
@@ -673,12 +678,12 @@ async fn apply_review_fixes(
                     .await;
             }
             Err(e) => {
-                let _ = tx
+                let _ = params.tx
                     .send(BaroEvent::ReviewLog {
                         line: format!("Fix {} failed: {}", fix_id, e),
                     })
                     .await;
-                let _ = tx
+                let _ = params.tx
                     .send(BaroEvent::StoryComplete {
                         id: fix_id.clone(),
                         duration_secs: 0,
@@ -912,14 +917,16 @@ async fn run_review_for_level(
         apply_review_fixes(
             &review.fixes,
             level_index,
-            cwd,
-            prd_path,
-            tx,
-            git_mutex,
-            timeout_secs,
-            model_routing,
-            override_model,
-            context,
+            &DagExecParams {
+                cwd,
+                prd_path,
+                tx,
+                git_mutex,
+                timeout_secs,
+                model_routing,
+                override_model,
+                context,
+            },
         )
         .await;
 
@@ -975,15 +982,8 @@ struct PrData {
 async fn execute_dag_levels(
     levels: &[crate::dag::DagLevel],
     stories: &[PrdStory],
-    cwd: &Path,
-    prd_path: &Path,
-    tx: &mpsc::Sender<BaroEvent>,
-    git_mutex: &Arc<Mutex<()>>,
     semaphore: &Option<Arc<Semaphore>>,
-    timeout_secs: u64,
-    model_routing: bool,
-    override_model: &Option<String>,
-    context_content: Option<&str>,
+    params: &DagExecParams<'_>,
 ) -> ExecutionStats {
     let story_map: HashMap<&str, &PrdStory> =
         stories.iter().map(|s| (s.id.as_str(), s)).collect();
@@ -1005,10 +1005,10 @@ async fn execute_dag_levels(
     for (level_index, level) in levels.iter().enumerate() {
         // Save current commit hash before executing stories in this level
         let saved_hash = {
-            let _git_lock = git_mutex.lock().await;
+            let _git_lock = params.git_mutex.lock().await;
             let output = Command::new("git")
                 .args(["rev-parse", "HEAD"])
-                .current_dir(cwd)
+                .current_dir(params.cwd)
                 .output()
                 .await;
             match output {
@@ -1027,15 +1027,16 @@ async fn execute_dag_levels(
                 continue;
             };
             let story = (*story).clone();
-            let cwd = cwd.to_path_buf();
-            let prd_path = prd_path.to_path_buf();
-            let tx = tx.clone();
-            let git_mutex = Arc::clone(git_mutex);
+            let cwd = params.cwd.to_path_buf();
+            let prd_path = params.prd_path.to_path_buf();
+            let tx = params.tx.clone();
+            let git_mutex = Arc::clone(params.git_mutex);
 
             let semaphore = semaphore.clone();
             let story_model =
-                resolve_model(override_model, &story.model, model_routing, "execute");
-            let ctx = context_content.map(str::to_string);
+                resolve_model(params.override_model, &story.model, params.model_routing, "execute");
+            let ctx = params.context.map(str::to_string);
+            let timeout_secs = params.timeout_secs;
             let handle = tokio::spawn(async move {
                 let _permit = if let Some(ref sem) = semaphore {
                     Some(sem.acquire().await.expect("semaphore closed"))
@@ -1068,7 +1069,7 @@ async fn execute_dag_levels(
                     stats.output_tokens += story_output;
                     level_completed_ids.push(story_id.clone());
 
-                    let _ = tx
+                    let _ = params.tx
                         .send(BaroEvent::StoryComplete {
                             id: story_id,
                             duration_secs,
@@ -1082,7 +1083,7 @@ async fn execute_dag_levels(
                     } else {
                         0
                     };
-                    let _ = tx
+                    let _ = params.tx
                         .send(BaroEvent::Progress {
                             completed: stats.completed,
                             total,
@@ -1095,7 +1096,7 @@ async fn execute_dag_levels(
                 }
                 Err(e) => {
                     stats.skipped += 1;
-                    let _ = tx
+                    let _ = params.tx
                         .send(BaroEvent::StoryLog {
                             id: story_id,
                             line: format!("Task panicked: {}", e),
@@ -1114,16 +1115,16 @@ async fn execute_dag_levels(
 
             let (cycles, fixes) = run_review_for_level(
                 &saved_hash,
-                cwd,
+                params.cwd,
                 &completed_stories,
-                tx,
-                git_mutex,
-                prd_path,
+                params.tx,
+                params.git_mutex,
+                params.prd_path,
                 level_index,
-                timeout_secs,
-                model_routing,
-                override_model,
-                context_content,
+                params.timeout_secs,
+                params.model_routing,
+                params.override_model,
+                params.context,
             )
             .await;
             stats.review_cycles += cycles;
@@ -1413,15 +1414,17 @@ pub async fn run_executor(
     let stats = execute_dag_levels(
         &levels,
         stories,
-        &cwd,
-        &prd_path,
-        &tx,
-        &git_mutex,
         &semaphore,
-        timeout_secs,
-        model_routing,
-        &override_model,
-        context_content.as_deref(),
+        &DagExecParams {
+            cwd: &cwd,
+            prd_path: &prd_path,
+            tx: &tx,
+            git_mutex: &git_mutex,
+            timeout_secs,
+            model_routing,
+            override_model: &override_model,
+            context: context_content.as_deref(),
+        },
     )
     .await;
 
