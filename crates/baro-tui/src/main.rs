@@ -1,4 +1,5 @@
 mod app;
+mod claude_runner;
 mod constants;
 mod context;
 mod dag;
@@ -587,39 +588,23 @@ fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEven
         };
 
         let result = async {
-            let mut args = vec![
-                "--dangerously-skip-permissions".to_string(),
-                "--output-format".to_string(), "json".to_string(),
-            ];
-            if let Some(ref model_name) = model {
-                args.push("--model".to_string());
-                args.push(model_name.clone());
-            }
-            args.push("-p".to_string());
-            args.push(prompt.clone());
+            let config = claude_runner::ClaudeRunConfig {
+                prompt: prompt.clone(),
+                cwd: cwd.clone(),
+                model: model.clone(),
+                timeout_secs: 600,
+                stream_json: false,
+            };
 
-            let output = Command::new("claude")
-                .args(&args)
-                .current_dir(&cwd)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()?
-                .wait_with_output()
-                .await?;
+            let output = claude_runner::spawn_claude_json(&config).await?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!("Claude exited with {}: {}", output.status, stderr).into());
-            }
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let claude_output: serde_json::Value = serde_json::from_str(&stdout)
+            let claude_output: serde_json::Value = serde_json::from_str(&output.stdout)
                 .map_err(|e| format!("Failed to parse Claude JSON wrapper: {}", e))?;
 
             let plan_text = claude_output
                 .get("result")
                 .and_then(|v| v.as_str())
-                .unwrap_or(&stdout);
+                .unwrap_or(&output.stdout);
 
             let json_str = extract_json(plan_text);
 
@@ -684,42 +669,25 @@ async fn run_claude_planner(goal: &str, cwd: &Path, model: Option<&str>, context
         None => base_prompt,
     };
 
-    let mut args = vec![
-        "--dangerously-skip-permissions",
-        "--output-format", "json",
-    ];
-    if let Some(model_name) = model {
-        args.push("--model");
-        args.push(model_name);
-    }
-    args.push("-p");
-    args.push(&prompt);
+    let config = claude_runner::ClaudeRunConfig {
+        prompt,
+        cwd: cwd.to_path_buf(),
+        model: model.map(|s| s.to_string()),
+        timeout_secs: 600,
+        stream_json: false,
+    };
 
-    let output = Command::new("claude")
-        .args(&args)
-        .current_dir(cwd)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?
-        .wait_with_output()
-        .await?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Claude exited with {}: {}", output.status, stderr).into());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let output = claude_runner::spawn_claude_json(&config).await?;
 
     // Claude --output-format json wraps the result; extract the text content
-    let claude_output: serde_json::Value = serde_json::from_str(&stdout)
+    let claude_output: serde_json::Value = serde_json::from_str(&output.stdout)
         .map_err(|e| format!("Failed to parse Claude JSON wrapper: {}", e))?;
 
     // The actual plan JSON is in the "result" field as a text string
     let plan_text = claude_output
         .get("result")
         .and_then(|v| v.as_str())
-        .unwrap_or(&stdout);
+        .unwrap_or(&output.stdout);
 
     let json_str = extract_json(plan_text);
 

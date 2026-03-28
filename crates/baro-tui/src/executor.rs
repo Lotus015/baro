@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex, Semaphore};
-use tokio::time::timeout;
 
 use crate::app::ReviewStory;
 use crate::dag::build_dag;
@@ -127,12 +125,12 @@ fn build_prompt(story: &PrdStory, cwd: &Path, context: Option<&str>) -> String {
 // ─── Claude stream-json parser ──────────────────────────────
 
 
-struct ParseResult {
-    logs: Vec<String>,
-    tokens: Option<(u64, u64)>,
+pub struct ParseResult {
+    pub logs: Vec<String>,
+    pub tokens: Option<(u64, u64)>,
 }
 
-fn parse_claude_stream_line(line: &str, _story_id: &str) -> ParseResult {
+pub fn parse_claude_stream_line(line: &str, _story_id: &str) -> ParseResult {
     let mut logs = Vec::new();
 
     let Ok(ev) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -361,117 +359,23 @@ async fn run_claude_for_story(
     timeout_secs: u64,
     model: &Option<String>,
 ) -> BaroResult<(u64, u64)> {
-    let mut args = vec![
-        "--dangerously-skip-permissions",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "-p",
-        prompt,
-    ];
-    let model_owned;
-    if let Some(ref m) = model {
-        model_owned = m.clone();
-        args.push("--model");
-        args.push(&model_owned);
-    }
-    let mut child = Command::new("claude")
-        .args(&args)
-        .current_dir(cwd)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn claude: {}", e))?;
+    let config = crate::claude_runner::ClaudeRunConfig {
+        prompt: prompt.to_string(),
+        cwd: cwd.to_path_buf(),
+        model: model.clone(),
+        timeout_secs,
+        stream_json: true,
+    };
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let result = crate::claude_runner::spawn_claude_and_stream(
+        &config,
+        story_id,
+        tx,
+        parse_claude_stream_line,
+    )
+    .await?;
 
-    let story_id_owned = story_id.to_string();
-    let tx_clone = tx.clone();
-
-    let result = timeout(Duration::from_secs(timeout_secs), async {
-        let story_id_out = story_id_owned.clone();
-        let tx_out = tx_clone.clone();
-        let stdout_task = tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
-            let mut acc_input: u64 = 0;
-            let mut acc_output: u64 = 0;
-            while let Ok(Some(line)) = lines.next_line().await {
-                let parsed = parse_claude_stream_line(&line, &story_id_out);
-                for log in parsed.logs {
-                    let _ = tx_out
-                        .send(BaroEvent::StoryLog {
-                            id: story_id_out.clone(),
-                            line: log,
-                        })
-                        .await;
-                }
-                if let Some((input_tokens, output_tokens)) = parsed.tokens {
-                    acc_input += input_tokens;
-                    acc_output += output_tokens;
-                    let _ = tx_out
-                        .send(BaroEvent::TokenUsage {
-                            id: story_id_out.clone(),
-                            input_tokens,
-                            output_tokens,
-                        })
-                        .await;
-                }
-            }
-            (acc_input, acc_output)
-        });
-
-        let story_id_err = story_id_owned.clone();
-        let tx_err = tx_clone.clone();
-        let stderr_task = tokio::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let trimmed = line.trim().to_string();
-                if !trimmed.is_empty() {
-                    let _ = tx_err
-                        .send(BaroEvent::StoryLog {
-                            id: story_id_err.clone(),
-                            line: trimmed,
-                        })
-                        .await;
-                }
-            }
-        });
-
-        let token_totals = stdout_task.await.unwrap_or((0, 0));
-        let _ = stderr_task.await;
-
-        let status = child
-            .wait()
-            .await
-            .map_err(|e| format!("Failed to wait for claude: {}", e))?;
-        Ok::<_, Box<dyn std::error::Error + Send + Sync>>((status, token_totals))
-    })
-    .await;
-
-    match result {
-        Ok(wait_result) => {
-            let (status, token_totals) = wait_result?;
-            if status.success() {
-                Ok(token_totals)
-            } else {
-                Err(format!("claude exited with code {}", status.code().unwrap_or(-1)).into())
-            }
-        }
-        Err(_) => {
-            let _ = child.kill().await;
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: story_id.to_string(),
-                    line: format!("[timeout] Story {} killed after {}s", story_id, timeout_secs),
-                })
-                .await;
-            Err(format!("Story timed out after {}s", timeout_secs).into())
-        }
-    }
+    Ok((result.input_tokens, result.output_tokens))
 }
 
 // ─── Build detection & execution ────────────────────────────
@@ -602,25 +506,15 @@ async fn verify_build_with_haiku(
         }
     );
 
-    let mut args = vec![
-        "--dangerously-skip-permissions".to_string(),
-        "--output-format".to_string(),
-        "json".to_string(),
-        "-p".to_string(),
+    let config = crate::claude_runner::ClaudeRunConfig {
         prompt,
-    ];
-    if let Some(ref m) = verification_model {
-        args.push("--model".to_string());
-        args.push(m.clone());
-    }
+        cwd: std::env::current_dir().unwrap_or_default(),
+        model: verification_model,
+        timeout_secs: 120,
+        stream_json: false,
+    };
 
-    let output = match Command::new("claude")
-        .args(&args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .await
-    {
+    let output = match crate::claude_runner::spawn_claude_json(&config).await {
         Ok(o) => o,
         Err(e) => {
             let _ = tx
@@ -633,8 +527,7 @@ async fn verify_build_with_haiku(
         }
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let json_str = extract_json(&stdout);
+    let json_str = extract_json(&output.stdout);
 
     #[derive(serde::Deserialize)]
     struct BuildVerificationResult {
@@ -708,41 +601,19 @@ async fn run_single_review_cycle(
     review_model: &Option<String>,
     cwd: &Path,
 ) -> Result<ReviewResult, String> {
-    let mut review_args = vec![
-        "--dangerously-skip-permissions".to_string(),
-        "--output-format".to_string(),
-        "json".to_string(),
-        "-p".to_string(),
-        prompt.to_string(),
-    ];
-    if let Some(ref m) = review_model {
-        review_args.push("--model".to_string());
-        review_args.push(m.clone());
-    }
+    let config = crate::claude_runner::ClaudeRunConfig {
+        prompt: prompt.to_string(),
+        cwd: cwd.to_path_buf(),
+        model: review_model.clone(),
+        timeout_secs: 300,
+        stream_json: false,
+    };
 
-    let child = Command::new("claude")
-        .args(&review_args)
-        .current_dir(cwd)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn claude for review: {}", e))?;
-
-    let output = child
-        .wait_with_output()
+    let output = crate::claude_runner::spawn_claude_json(&config)
         .await
-        .map_err(|e| format!("Review claude process error: {}", e))?;
+        .map_err(|e| e.to_string())?;
 
-    if !output.status.success() {
-        return Err(format!(
-            "Review claude exited with code {}",
-            output.status.code().unwrap_or(-1)
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_review_result(&stdout)
+    parse_review_result(&output.stdout)
 }
 
 /// Execute fix stories generated by a failed review.
