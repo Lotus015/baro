@@ -609,47 +609,36 @@ async fn run_app(
                         KeyCode::Right => app.next_tab(),
                         KeyCode::Up | KeyCode::Char('k') => {
                             if app.global_tab == app::GlobalTab::Dashboard {
-                                app.story_list_scroll_up();
+                                let inner_h = terminal.size().map(|s| s.height.saturating_sub(12) as usize).unwrap_or(20);
+                                let active_ids = app.active_story_ids();
+                                let selected_id = active_ids.get(app.selected_log_index).cloned().unwrap_or_default();
+                                if !app.review_logs.is_empty() && active_ids.is_empty() {
+                                    let total = app.review_logs.len();
+                                    app.review_log_scroll_up(1, total, inner_h);
+                                } else if let Some(story) = app.active_stories.get(&selected_id) {
+                                    let total = story.logs.len();
+                                    app.log_scroll_up(1, total, inner_h);
+                                }
                             } else if app.global_tab == app::GlobalTab::Dag {
                                 app.dag_scroll_up();
                             }
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
                             if app.global_tab == app::GlobalTab::Dashboard {
-                                let count = app.story_list_item_count();
-                                app.story_list_scroll_down(count);
+                                let inner_h = terminal.size().map(|s| s.height.saturating_sub(12) as usize).unwrap_or(20);
+                                let active_ids = app.active_story_ids();
+                                let selected_id = active_ids.get(app.selected_log_index).cloned().unwrap_or_default();
+                                if !app.review_logs.is_empty() && active_ids.is_empty() {
+                                    let total = app.review_logs.len();
+                                    app.review_log_scroll_down(1, total, inner_h);
+                                } else if let Some(story) = app.active_stories.get(&selected_id) {
+                                    let total = story.logs.len();
+                                    app.log_scroll_down(1, total, inner_h);
+                                }
                             } else if app.global_tab == app::GlobalTab::Dag {
                                 let total = app.dag_line_count();
                                 let visible = terminal.size().map(|s| s.height.saturating_sub(10)).unwrap_or(20);
                                 app.dag_scroll_down(total, visible);
-                            }
-                        }
-                        KeyCode::PageUp => {
-                            if app.global_tab == app::GlobalTab::Dashboard {
-                                let inner_h = terminal.size().map(|s| s.height.saturating_sub(12) as usize).unwrap_or(20);
-                                let active_ids = app.active_story_ids();
-                                let selected_id = active_ids.get(app.selected_log_index).cloned().unwrap_or_default();
-                                if !app.review_logs.is_empty() && active_ids.is_empty() {
-                                    let total = app.review_logs.len();
-                                    app.review_log_scroll_up(inner_h / 2, total, inner_h);
-                                } else if let Some(story) = app.active_stories.get(&selected_id) {
-                                    let total = story.logs.len();
-                                    app.log_scroll_up(inner_h / 2, total, inner_h);
-                                }
-                            }
-                        }
-                        KeyCode::PageDown => {
-                            if app.global_tab == app::GlobalTab::Dashboard {
-                                let inner_h = terminal.size().map(|s| s.height.saturating_sub(12) as usize).unwrap_or(20);
-                                let active_ids = app.active_story_ids();
-                                let selected_id = active_ids.get(app.selected_log_index).cloned().unwrap_or_default();
-                                if !app.review_logs.is_empty() && active_ids.is_empty() {
-                                    let total = app.review_logs.len();
-                                    app.review_log_scroll_down(inner_h / 2, total, inner_h);
-                                } else if let Some(story) = app.active_stories.get(&selected_id) {
-                                    let total = story.logs.len();
-                                    app.log_scroll_down(inner_h / 2, total, inner_h);
-                                }
                             }
                         }
                         _ => {}

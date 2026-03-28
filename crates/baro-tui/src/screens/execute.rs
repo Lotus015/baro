@@ -173,7 +173,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             elapsed % 60,
         )
     } else {
-        " 1/2/3:tabs | Tab/Shift+Tab:logs | PgUp/PgDn:scroll log | q:quit".to_string()
+        " 1/2/3:tabs | Tab/Shift+Tab:logs | \u{2191}\u{2193}:scroll | q:quit".to_string()
     };
 
     let footer = Paragraph::new(Span::styled(msg, Style::default().fg(theme::MUTED)));
