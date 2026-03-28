@@ -262,7 +262,8 @@ pub(crate) async fn git_push_with_retry(
 
     let branch_name = get_current_branch(cwd).await?;
 
-    let max_attempts = 3;
+    let max_attempts = crate::constants::GIT_PUSH_MAX_ATTEMPTS;
+    let mut last_stderr = String::new();
     for attempt in 1..=max_attempts {
         let _ = tx
             .send(BaroEvent::StoryLog {
@@ -288,15 +289,10 @@ pub(crate) async fn git_push_with_retry(
             return Ok(());
         }
 
+        last_stderr = String::from_utf8_lossy(&push.stderr).trim().to_string();
+
         if attempt == max_attempts {
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: story_id.to_string(),
-                    line: "[git] push failed after 3 attempts".to_string(),
-                })
-                .await;
-            let stderr = String::from_utf8_lossy(&push.stderr).trim().to_string();
-            return Err(format!("Push failed after 3 attempts: {}", stderr));
+            break;
         }
 
         // Pull --rebase and retry
@@ -332,5 +328,11 @@ pub(crate) async fn git_push_with_retry(
         }
     }
 
-    unreachable!()
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: story_id.to_string(),
+            line: "[git] push failed after 3 attempts".to_string(),
+        })
+        .await;
+    Err(format!("Push failed after 3 attempts: {}", last_stderr))
 }
