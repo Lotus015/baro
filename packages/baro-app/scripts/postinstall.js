@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * Postinstall script - downloads the baro binary for the current platform.
- * Binary is fetched from GitHub Releases.
+ * Binary is fetched from GitHub Releases and saved as baro-native (not baro)
+ * so the package directory only contains small npm-managed files, avoiding
+ * ENOTEMPTY errors on upgrade.
  */
 
 import * as fs from "fs"
@@ -12,7 +14,7 @@ import * as https from "https"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PACKAGE_ROOT = path.resolve(__dirname, "..")
 const BIN_DIR = path.join(PACKAGE_ROOT, "bin")
-const BINARY_NAME = process.platform === "win32" ? "baro.exe" : "baro"
+const NATIVE_NAME = process.platform === "win32" ? "baro-native.exe" : "baro-native"
 const REPO = "Lotus015/baro"
 
 function getPlatformKey() {
@@ -64,23 +66,26 @@ async function download(url, dest) {
 }
 
 async function main() {
-    const binaryPath = path.join(BIN_DIR, BINARY_NAME)
+    const nativePath = path.join(BIN_DIR, NATIVE_NAME)
     const platformKey = getPlatformKey()
     const version = getVersion()
 
     const artifactName = process.platform === "win32"
         ? `baro-${platformKey}.exe`
-        : `${BINARY_NAME}-${platformKey}`
+        : `baro-${platformKey}`
     const url = `https://github.com/${REPO}/releases/download/v${version}/${artifactName}`
 
     console.log(`Downloading baro for ${platformKey}...`)
 
     fs.mkdirSync(BIN_DIR, { recursive: true })
 
+    // Clean up old binary (from previous versions or failed installs)
+    try { fs.unlinkSync(nativePath) } catch {}
+
     try {
-        await download(url, binaryPath)
+        await download(url, nativePath)
         if (process.platform !== "win32") {
-            fs.chmodSync(binaryPath, 0o755)
+            fs.chmodSync(nativePath, 0o755)
         }
         console.log(`baro installed successfully`)
     } catch (err) {

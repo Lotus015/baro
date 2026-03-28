@@ -4,3 +4,5 @@ target/
 *.lock
 .DS_Store
 prd.json
+baro-native
+baro-native.exe
