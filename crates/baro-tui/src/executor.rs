@@ -55,7 +55,7 @@ fn default_retries() -> u32 {
 
 // ─── Story prompt builder ───────────────────────────────────
 
-fn build_prompt(story: &PrdStory, cwd: &Path) -> String {
+fn build_prompt(story: &PrdStory, cwd: &Path, context: Option<&str>) -> String {
     let template_path = cwd.join("prompt.md");
     let template = if template_path.exists() {
         std::fs::read_to_string(&template_path).unwrap_or_default()
@@ -94,12 +94,17 @@ fn build_prompt(story: &PrdStory, cwd: &Path) -> String {
         story.tests.join(" && ")
     };
 
-    template
+    let template_result = template
         .replace("STORY_ID", &story.id)
         .replace("STORY_TITLE", &story.title)
         .replace("STORY_DESCRIPTION", &story.description)
         .replace("ACCEPTANCE_CRITERIA", &acceptance)
-        .replace("TEST_COMMANDS", &tests)
+        .replace("TEST_COMMANDS", &tests);
+
+    match context {
+        Some(ctx) => format!("Here is the project context:\n{}\n\n{}", ctx, template_result),
+        None => template_result,
+    }
 }
 
 // ─── Claude stream-json parser ──────────────────────────────
@@ -250,6 +255,7 @@ async fn execute_story(
     git_mutex: &Mutex<()>,
     timeout_secs: u64,
     model: Option<String>,
+    context: Option<&str>,
 ) -> Result<(u64, u32, u32, u64, u64), String> {
     let max_attempts = story.retries + 1;
 
@@ -278,7 +284,7 @@ async fn execute_story(
         }
 
         let start = Instant::now();
-        let prompt = build_prompt(story, cwd);
+        let prompt = build_prompt(story, cwd, context);
 
         let result =
             run_claude_for_story(&story.id, &prompt, cwd, tx, timeout_secs, &model).await;
@@ -611,6 +617,7 @@ async fn run_review_for_level(
     timeout_secs: u64,
     model_routing: bool,
     override_model: &Option<String>,
+    context: Option<&str>,
 ) -> (u32, u32) {
     let mut cycles_run: u32 = 0;
     let mut total_fixes_applied: u32 = 0;
@@ -717,7 +724,7 @@ async fn run_review_for_level(
         };
 
         // Build review prompt — acceptance criteria + code quality checks
-        let prompt = format!(
+        let base_review_prompt = format!(
             "You are a focused code reviewer. Check whether the acceptance criteria are met by the diff, \
              and also check for obvious code quality problems.\n\n\
              ACCEPTANCE CRITERIA:\n{}\n\n\
@@ -747,6 +754,10 @@ async fn run_review_for_level(
                 &diff
             }
         );
+        let prompt = match context {
+            Some(ctx) => format!("Here is the project context:\n{}\n\n{}", ctx, base_review_prompt),
+            None => base_review_prompt,
+        };
 
         let review_model = resolve_model(override_model, &None, model_routing, "review");
         let review_model_label = review_model.as_deref().unwrap_or("default");
@@ -908,7 +919,7 @@ async fn run_review_for_level(
             };
 
             let fix_model = resolve_model(override_model, &None, model_routing, "execute");
-            match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, timeout_secs, fix_model)
+            match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, timeout_secs, fix_model, context)
                 .await
             {
                 Ok((duration_secs, files_created, files_modified, _, _)) => {
@@ -979,6 +990,7 @@ pub async fn run_executor(
     timeout_secs: u64,
     model_routing: bool,
     override_model: Option<String>,
+    context_content: Option<String>,
 ) {
     let prd_path = cwd.join("prd.json");
     let stories = &prd.user_stories;
@@ -1091,6 +1103,7 @@ pub async fn run_executor(
             let semaphore = semaphore.clone();
             let story_model =
                 resolve_model(&override_model, &story.model, model_routing, "execute");
+            let ctx = context_content.clone();
             let handle = tokio::spawn(async move {
                 let _permit = if let Some(ref sem) = semaphore {
                     Some(sem.acquire().await.expect("semaphore closed"))
@@ -1105,6 +1118,7 @@ pub async fn run_executor(
                     &git_mutex,
                     timeout_secs,
                     story_model,
+                    ctx.as_deref(),
                 )
                 .await
             });
@@ -1179,6 +1193,7 @@ pub async fn run_executor(
                 timeout_secs,
                 model_routing,
                 &override_model,
+                context_content.as_deref(),
             )
             .await;
             review_cycles += cycles;

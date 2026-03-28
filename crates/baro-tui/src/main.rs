@@ -431,11 +431,12 @@ async fn run_app(
                                         let branch_tx = tx.clone();
                                         let mr = app.model_routing;
                                         let om = app.override_model.clone();
+                                        let ctx = app.claude_md_content.clone();
                                         tokio::spawn(async move {
                                             if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
                                                 eprintln!("[baro] branch checkout failed: {}", e);
                                             }
-                                            spawn_executor(prd, exec_cwd, branch_tx, parallel, timeout_secs, mr, om);
+                                            spawn_executor(prd, exec_cwd, branch_tx, parallel, timeout_secs, mr, om, ctx);
                                         });
                                     }
                                     Err(e) => {
@@ -464,11 +465,12 @@ async fn run_app(
                                     let branch_tx = tx.clone();
                                     let mr = app.model_routing;
                                     let om = app.override_model.clone();
+                                    let ctx = app.claude_md_content.clone();
                                     tokio::spawn(async move {
                                         if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
                                             eprintln!("[baro] branch creation failed: {}", e);
                                         }
-                                        spawn_executor(exec_prd, exec_cwd, branch_tx, parallel, timeout_secs, mr, om);
+                                        spawn_executor(exec_prd, exec_cwd, branch_tx, parallel, timeout_secs, mr, om, ctx);
                                     });
                                 }
                             }
@@ -507,10 +509,11 @@ fn spawn_planner(app: &App, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
     let planner = app.planner;
     let cwd = cwd.to_path_buf();
     let model = app.model_for_phase("planning");
+    let context = app.claude_md_content.clone();
 
     tokio::spawn(async move {
         let result = match planner {
-            Planner::Claude => run_claude_planner(&goal, &cwd, model.as_deref()).await,
+            Planner::Claude => run_claude_planner(&goal, &cwd, model.as_deref(), context.as_deref()).await,
             Planner::OpenAI => run_openai_planner(&goal, &cwd).await,
         };
 
@@ -548,6 +551,7 @@ fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEven
     let feedback = feedback.to_string();
     let cwd = cwd.to_path_buf();
     let model = app.model_for_phase("planning");
+    let context = app.claude_md_content.clone();
 
     // Build current plan JSON from app state
     let stories_json: Vec<serde_json::Value> = app.review_stories.iter().map(|s| {
@@ -567,10 +571,14 @@ fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEven
     let plan_str = serde_json::to_string_pretty(&plan_json).unwrap_or_default();
 
     tokio::spawn(async move {
-        let prompt = format!(
+        let base_prompt = format!(
             "Here is the current plan:\n{}\nThe user wants these changes: {}\nGenerate an updated plan with the same JSON schema. Keep stories the user did not mention unchanged. Output ONLY valid JSON, no markdown, no explanation.",
             plan_str, feedback
         );
+        let prompt = match context {
+            Some(ctx) => format!("Here is the project context:\n{}\n\n{}", ctx, base_prompt),
+            None => base_prompt,
+        };
 
         let result = async {
             let mut args = vec![
@@ -646,6 +654,7 @@ fn spawn_executor(
     timeout_secs: u64,
     model_routing: bool,
     override_model: Option<String>,
+    context_content: Option<String>,
 ) {
     // Create a channel bridge: executor sends BaroEvent, we wrap them as AppEvent::Baro
     let (exec_tx, mut exec_rx) = mpsc::channel::<BaroEvent>(256);
@@ -662,12 +671,16 @@ fn spawn_executor(
 
     // Run executor
     tokio::spawn(async move {
-        executor::run_executor(prd, cwd, exec_tx, parallel, timeout_secs, model_routing, override_model).await;
+        executor::run_executor(prd, cwd, exec_tx, parallel, timeout_secs, model_routing, override_model, context_content).await;
     });
 }
 
-async fn run_claude_planner(goal: &str, cwd: &Path, model: Option<&str>) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
-    let prompt = format!("{}\n\nUser goal: {}", CLAUDE_PLANNER_PROMPT, goal);
+async fn run_claude_planner(goal: &str, cwd: &Path, model: Option<&str>, context: Option<&str>) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
+    let base_prompt = format!("{}\n\nUser goal: {}", CLAUDE_PLANNER_PROMPT, goal);
+    let prompt = match context {
+        Some(ctx) => format!("Here is the project context:\n{}\n\n{}", ctx, base_prompt),
+        None => base_prompt,
+    };
 
     let mut args = vec![
         "--dangerously-skip-permissions",
