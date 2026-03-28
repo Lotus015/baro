@@ -293,10 +293,20 @@ async fn execute_story(
             .await;
 
         // Git pull --rebase before running claude (best-effort, never fatal)
-        {
+        // Also capture the pre-story HEAD sha for accurate diff stats
+        let pre_story_sha = {
             let _git_lock = git_mutex.lock().await;
             crate::git::safe_pull_rebase(cwd, &story.id, tx).await;
-        }
+            Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(cwd)
+                .output()
+                .await
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        };
 
         let start = Instant::now();
         let prompt = build_prompt(story, cwd, context);
@@ -315,8 +325,8 @@ async fn execute_story(
                     // Update prd.json
                     let _ = crate::git::update_prd_story(prd_path, &story.id, duration_secs);
 
-                    // Get git stats
-                    crate::git::get_git_file_stats(cwd).await
+                    // Get git stats using pre-story sha for accurate multi-commit diff
+                    crate::git::get_git_file_stats(cwd, pre_story_sha.as_deref()).await
                 };
 
                 // Push with retry (acquires git_mutex internally)
