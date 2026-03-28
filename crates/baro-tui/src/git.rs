@@ -186,9 +186,14 @@ pub(crate) async fn safe_pull_rebase(
 
 // ─── Git file stats ──────────────────────────────────────────
 
-pub(crate) async fn get_git_file_stats(cwd: &Path) -> (u32, u32) {
+pub(crate) async fn get_git_file_stats(cwd: &Path, base_sha: Option<&str>) -> (u32, u32) {
+    let args: Vec<&str> = if let Some(sha) = base_sha {
+        vec!["diff", "--name-status", sha, "HEAD"]
+    } else {
+        vec!["diff", "--name-status", "HEAD~1", "HEAD"]
+    };
     let output = Command::new("git")
-        .args(["diff", "--name-status", "HEAD~1", "HEAD"])
+        .args(&args)
         .current_dir(cwd)
         .output()
         .await;

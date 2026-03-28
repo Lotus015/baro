@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use ratatui::widgets::ListState;
+
 use crate::events::{BaroEvent, DoneStats};
 
 use crate::constants::MAX_LOG_LINES;
@@ -170,6 +172,8 @@ pub struct App {
     pub global_tab: GlobalTab,
     pub selected_log_index: usize,
     pub tick_count: u64,
+    pub story_list_state: ListState,
+    pub dag_scroll_offset: u16,
 }
 
 impl App {
@@ -223,6 +227,8 @@ impl App {
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
             tick_count: 0,
+            story_list_state: ListState::default(),
+            dag_scroll_offset: 0,
         }
     }
 
@@ -247,6 +253,7 @@ impl App {
     pub fn start_execution(&mut self) {
         self.screen = Screen::Execute;
         self.start_time = Instant::now();
+        self.dag_scroll_offset = 0;
     }
 
     pub fn planning_elapsed_secs(&self) -> u64 {
@@ -287,6 +294,134 @@ impl App {
             } else {
                 self.selected_log_index - 1
             };
+        }
+    }
+
+    pub fn dag_scroll_up(&mut self) {
+        self.dag_scroll_offset = self.dag_scroll_offset.saturating_sub(1);
+    }
+
+    pub fn dag_scroll_down(&mut self, total_lines: u16, visible_height: u16) {
+        let max = total_lines.saturating_sub(visible_height);
+        if self.dag_scroll_offset < max {
+            self.dag_scroll_offset += 1;
+        }
+    }
+
+    pub fn dag_line_count(&self) -> u16 {
+        if self.dag_levels.is_empty() {
+            return 2; // empty line + waiting message
+        }
+        let mut count: u16 = 1; // initial empty line
+        for (i, level) in self.dag_levels.iter().enumerate() {
+            count += 3; // level header (top border, label, bottom border)
+            for story_id in level {
+                count += 1; // story line
+                if let Some(story) = self.stories.iter().find(|s| s.id == *story_id) {
+                    if story.error.is_some() {
+                        count += 1; // error line
+                    }
+                }
+            }
+            if i < self.dag_levels.len() - 1 {
+                count += 2; // connector + arrow
+            }
+            count += 1; // trailing empty line
+        }
+        count
+    }
+
+    pub fn dag_auto_scroll_to_story(&mut self, story_id: &str, visible_height: u16) {
+        if self.dag_levels.is_empty() {
+            return;
+        }
+        let mut line: u16 = 1; // initial empty line
+        for (i, level) in self.dag_levels.iter().enumerate() {
+            let level_start = line;
+            line += 3; // level header
+            for sid in level {
+                if sid == story_id {
+                    // Scroll so the level header is visible
+                    if level_start < self.dag_scroll_offset {
+                        self.dag_scroll_offset = level_start;
+                    } else if line >= self.dag_scroll_offset + visible_height {
+                        self.dag_scroll_offset = line.saturating_sub(visible_height) + 1;
+                    }
+                    return;
+                }
+                line += 1;
+                if let Some(story) = self.stories.iter().find(|s| s.id == *sid) {
+                    if story.error.is_some() {
+                        line += 1;
+                    }
+                }
+            }
+            if i < self.dag_levels.len() - 1 {
+                line += 2;
+            }
+            line += 1;
+        }
+    }
+
+    pub fn story_list_scroll_up(&mut self) {
+        let i = self.story_list_state.selected().unwrap_or(0);
+        self.story_list_state.select(Some(i.saturating_sub(1)));
+    }
+
+    pub fn story_list_scroll_down(&mut self, item_count: usize) {
+        let i = self.story_list_state.selected().unwrap_or(0);
+        let next = if item_count == 0 { 0 } else { (i + 1).min(item_count - 1) };
+        self.story_list_state.select(Some(next));
+    }
+
+    pub fn story_list_item_count(&self) -> usize {
+        if self.dag_levels.is_empty() {
+            self.stories.len()
+        } else {
+            let mut count = 0;
+            for (i, level) in self.dag_levels.iter().enumerate() {
+                count += 1; // level header
+                count += level.len(); // stories in level
+                if self.review_in_progress && self.review_level == i {
+                    count += 1; // review spinner
+                }
+                if i < self.dag_levels.len() - 1 {
+                    count += 1; // separator
+                }
+            }
+            count
+        }
+    }
+
+    pub fn auto_scroll_to_running(&mut self) {
+        let mut index = 0;
+        if self.dag_levels.is_empty() {
+            for story in &self.stories {
+                if story.status == StoryStatus::Running {
+                    self.story_list_state.select(Some(index));
+                    return;
+                }
+                index += 1;
+            }
+        } else {
+            for (i, level) in self.dag_levels.iter().enumerate() {
+                index += 1; // level header
+                for story_id in level {
+                    if let Some(story) = self.stories.iter().find(|s| s.id == *story_id) {
+                        if story.status == StoryStatus::Running {
+                            self.story_list_state.select(Some(index));
+                            return;
+                        }
+                    }
+                    index += 1;
+                }
+                if self.review_in_progress && self.review_level == i {
+                    index += 1;
+                }
+                if i < self.dag_levels.len() - 1 {
+                    index += 1;
+                }
+            }
         }
     }
 

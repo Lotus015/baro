@@ -18,6 +18,58 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::Parser;
+
+/// Guard that holds a session lock file and removes it on drop.
+struct SessionLock {
+    path: PathBuf,
+}
+
+impl SessionLock {
+    fn acquire(cwd: &Path) -> Result<Self, String> {
+        let lock_path = cwd.join("baro.lock");
+
+        if lock_path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&lock_path) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    if is_process_alive(pid) {
+                        return Err(
+                            "Another baro session is active in this directory. Multiple sessions per project coming soon.".to_string()
+                        );
+                    }
+                }
+            }
+            // Stale lock file — overwrite below
+        }
+
+        std::fs::write(&lock_path, std::process::id().to_string())
+            .map_err(|e| format!("Failed to create lock file: {}", e))?;
+
+        Ok(SessionLock { path: lock_path })
+    }
+}
+
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(unix)]
+fn is_process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_process_alive(_pid: u32) -> bool {
+    // On non-Unix platforms, assume stale lock
+    false
+}
 use crossterm::{
     execute,
     terminal::{
@@ -80,6 +132,7 @@ enum AppEvent {
     PlanError(String),
     RefineReady(Vec<ReviewStory>, String, String, String),
     RefineError(String),
+    BranchError(String),
     Tick,
 }
 
@@ -163,6 +216,18 @@ struct PrdStoryOutput {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
+    // Resolve cwd early so we can acquire the session lock before entering the TUI
+    let cwd = std::fs::canonicalize(&cli.cwd)?;
+
+    // Acquire session lock — prints error and exits if another session is active
+    let _lock = match SessionLock::acquire(&cwd) {
+        Ok(lock) => lock,
+        Err(msg) => {
+            eprintln!("{}", msg);
+            std::process::exit(1);
+        }
+    };
+
     let mut writer = open_terminal_writer()?;
     enable_raw_mode()?;
     execute!(writer, EnterAlternateScreen)?;
@@ -177,6 +242,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     terminal.backend_mut().flush()?;
+
+    // _lock is dropped here, removing baro.lock
 
     if let Err(err) = result {
         eprintln!("Error: {}", err);
@@ -285,7 +352,7 @@ async fn run_app(
     });
 
     loop {
-        terminal.draw(|f| ui::render(f, &app))?;
+        terminal.draw(|f| ui::render(f, &mut app))?;
         match rx.recv().await {
             Some(AppEvent::Baro(ev)) => {
                 // Fire notification immediately when stories complete
@@ -313,7 +380,21 @@ async fn run_app(
                         _ => {}
                     }
                 }
+                let story_start_id = if let BaroEvent::StoryStart { ref id, .. } = ev {
+                    Some(id.clone())
+                } else {
+                    None
+                };
                 app.handle_event(ev);
+                if story_start_id.is_some() {
+                    app.auto_scroll_to_running();
+                }
+                if let Some(ref sid) = story_start_id {
+                    if app.global_tab == app::GlobalTab::Dag {
+                        let visible = terminal.size().map(|s| s.height.saturating_sub(10)).unwrap_or(20);
+                        app.dag_auto_scroll_to_story(sid, visible);
+                    }
+                }
             }
             Some(AppEvent::ContextReady(content)) => {
                 app.claude_md_content = Some(content);
@@ -342,6 +423,10 @@ async fn run_app(
             Some(AppEvent::RefineError(err)) => {
                 app.refining = false;
                 app.planning_error = Some(err);
+            }
+            Some(AppEvent::BranchError(err)) => {
+                app.planning_error = Some(err);
+                app.screen = Screen::Review;
             }
             Some(AppEvent::Key(key)) => {
                 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
@@ -437,9 +522,28 @@ async fn run_app(
                                         let ctx = app.claude_md_content.clone();
                                         let pl = app.parallel_limit;
                                         let ts = app.timeout_secs;
+                                        let err_tx = tx.clone();
                                         tokio::spawn(async move {
                                             if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
-                                                eprintln!("[baro] branch checkout failed: {}", e);
+                                                let _ = err_tx.send(AppEvent::BranchError(
+                                                    format!("Branch creation failed: {}. Cannot proceed on main branch.", e)
+                                                )).await;
+                                                return;
+                                            }
+                                            match git::get_current_branch(&exec_cwd).await {
+                                                Ok(ref actual) if actual == &branch_name_clone => {}
+                                                Ok(actual) => {
+                                                    let _ = err_tx.send(AppEvent::BranchError(
+                                                        format!("Branch verification failed: expected '{}', got '{}'. Cannot proceed on main branch.", branch_name_clone, actual)
+                                                    )).await;
+                                                    return;
+                                                }
+                                                Err(e) => {
+                                                    let _ = err_tx.send(AppEvent::BranchError(
+                                                        format!("Branch verification failed: {}. Cannot proceed on main branch.", e)
+                                                    )).await;
+                                                    return;
+                                                }
                                             }
                                             spawn_executor(prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx });
                                         });
@@ -473,9 +577,28 @@ async fn run_app(
                                     let ctx = app.claude_md_content.clone();
                                     let pl = app.parallel_limit;
                                     let ts = app.timeout_secs;
+                                    let err_tx = tx.clone();
                                     tokio::spawn(async move {
                                         if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
-                                            eprintln!("[baro] branch creation failed: {}", e);
+                                            let _ = err_tx.send(AppEvent::BranchError(
+                                                format!("Branch creation failed: {}. Cannot proceed on main branch.", e)
+                                            )).await;
+                                            return;
+                                        }
+                                        match git::get_current_branch(&exec_cwd).await {
+                                            Ok(ref actual) if actual == &branch_name_clone => {}
+                                            Ok(actual) => {
+                                                let _ = err_tx.send(AppEvent::BranchError(
+                                                    format!("Branch verification failed: expected '{}', got '{}'. Cannot proceed on main branch.", branch_name_clone, actual)
+                                                )).await;
+                                                return;
+                                            }
+                                            Err(e) => {
+                                                let _ = err_tx.send(AppEvent::BranchError(
+                                                    format!("Branch verification failed: {}. Cannot proceed on main branch.", e)
+                                                )).await;
+                                                return;
+                                            }
                                         }
                                         spawn_executor(exec_prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx });
                                     });
@@ -498,6 +621,23 @@ async fn run_app(
                         KeyCode::BackTab => app.prev_log(),
                         KeyCode::Left => app.prev_tab(),
                         KeyCode::Right => app.next_tab(),
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if app.global_tab == app::GlobalTab::Dashboard {
+                                app.story_list_scroll_up();
+                            } else if app.global_tab == app::GlobalTab::Dag {
+                                app.dag_scroll_up();
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if app.global_tab == app::GlobalTab::Dashboard {
+                                let count = app.story_list_item_count();
+                                app.story_list_scroll_down(count);
+                            } else if app.global_tab == app::GlobalTab::Dag {
+                                let total = app.dag_line_count();
+                                let visible = terminal.size().map(|s| s.height.saturating_sub(10)).unwrap_or(20);
+                                app.dag_scroll_down(total, visible);
+                            }
+                        }
                         _ => {}
                     },
                 }

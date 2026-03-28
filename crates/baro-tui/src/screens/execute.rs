@@ -14,7 +14,7 @@ use super::execute_dashboard::render_dashboard;
 use super::execute_dag::render_dag_full;
 use super::execute_stats::render_stats_full;
 
-pub fn render(f: &mut Frame, app: &App) {
+pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -48,7 +48,7 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(60),
-            Constraint::Length(36),
+            Constraint::Min(40),
         ])
         .split(area);
 
