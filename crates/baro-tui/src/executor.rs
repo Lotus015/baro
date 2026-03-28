@@ -1384,8 +1384,8 @@ pub async fn run_executor(
             .ok()?;
         let current_prd: PrdFile = serde_json::from_str(&prd_data).ok()?;
 
-        // Calculate per-level parallelism gain using DAG
-        let dag_levels = crate::dag::build_dag(&current_prd.user_stories).unwrap_or_default();
+        // Calculate per-level parallelism gain using DAG (use all stories, not just incomplete)
+        let dag_levels = crate::dag::build_dag_all(&current_prd.user_stories).unwrap_or_default();
         let (level_saved, sequential_time) = {
             let mut tseq = 0u64;
             let mut tpar = 0u64;
