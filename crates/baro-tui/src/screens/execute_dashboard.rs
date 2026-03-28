@@ -167,7 +167,9 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
         if !app.review_logs.is_empty() {
             let total_logs = app.review_logs.len();
             let inner_height = area.height.saturating_sub(2) as usize;
-            let skip = total_logs.saturating_sub(inner_height);
+            let tail = total_logs.saturating_sub(inner_height);
+            let stored = app.review_log_scroll_offset;
+            let skip = if stored == usize::MAX { tail } else { stored.min(tail) };
             let visible_logs: Vec<Line> = app.review_logs[skip..]
                 .iter()
                 .map(|l| Line::from(Span::styled(l.clone(), Style::default().fg(theme::TEXT))))
@@ -274,7 +276,9 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
     if let Some(story) = app.active_stories.get(&selected_id) {
         let total_logs = story.logs.len();
         let inner_height = log_chunks[1].height.saturating_sub(2) as usize;
-        let skip = total_logs.saturating_sub(inner_height);
+        let tail = total_logs.saturating_sub(inner_height);
+        let stored = app.log_scroll_offsets.get(&selected_id).copied().unwrap_or(usize::MAX);
+        let skip = if stored == usize::MAX { tail } else { stored.min(tail) };
         let visible_logs: Vec<Line> = story.logs[skip..]
             .iter()
             .map(|l| Line::from(Span::styled(l.clone(), Style::default().fg(theme::TEXT))))

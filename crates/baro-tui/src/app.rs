@@ -174,6 +174,8 @@ pub struct App {
     pub tick_count: u64,
     pub story_list_state: ListState,
     pub dag_scroll_offset: u16,
+    pub log_scroll_offsets: HashMap<String, usize>,
+    pub review_log_scroll_offset: usize,
 }
 
 impl App {
@@ -229,6 +231,8 @@ impl App {
             tick_count: 0,
             story_list_state: ListState::default(),
             dag_scroll_offset: 0,
+            log_scroll_offsets: HashMap::new(),
+            review_log_scroll_offset: usize::MAX,
         }
     }
 
@@ -295,6 +299,55 @@ impl App {
                 self.selected_log_index - 1
             };
         }
+    }
+
+    /// Scroll the active story's log panel up by `lines`. Pins position (stops auto-scroll).
+    pub fn log_scroll_up(&mut self, lines: usize, total_logs: usize, inner_height: usize) {
+        let tail = total_logs.saturating_sub(inner_height);
+        let ids = self.active_story_ids();
+        if let Some(id) = ids.get(self.selected_log_index) {
+            let entry = self.log_scroll_offsets.entry(id.clone()).or_insert(usize::MAX);
+            if *entry == usize::MAX {
+                *entry = tail.saturating_sub(lines);
+            } else {
+                *entry = entry.saturating_sub(lines);
+            }
+        }
+    }
+
+    /// Scroll the active story's log panel down by `lines`. Returns to tail (auto-scroll) at MAX.
+    pub fn log_scroll_down(&mut self, lines: usize, total_logs: usize, inner_height: usize) {
+        let ids = self.active_story_ids();
+        if let Some(id) = ids.get(self.selected_log_index) {
+            let tail = total_logs.saturating_sub(inner_height);
+            let entry = self.log_scroll_offsets.entry(id.clone()).or_insert(usize::MAX);
+            if *entry == usize::MAX {
+                return;
+            }
+            let next = entry.saturating_add(lines);
+            *entry = if next >= tail { usize::MAX } else { next };
+        }
+    }
+
+    /// Scroll the review log panel up by `lines`.
+    pub fn review_log_scroll_up(&mut self, lines: usize, total_logs: usize, inner_height: usize) {
+        let tail = total_logs.saturating_sub(inner_height);
+        if self.review_log_scroll_offset == usize::MAX {
+            // Convert from tail-following to a real pinned position
+            self.review_log_scroll_offset = tail.saturating_sub(lines);
+        } else {
+            self.review_log_scroll_offset = self.review_log_scroll_offset.saturating_sub(lines);
+        }
+    }
+
+    /// Scroll the review log panel down by `lines`.
+    pub fn review_log_scroll_down(&mut self, lines: usize, total_logs: usize, inner_height: usize) {
+        let tail = total_logs.saturating_sub(inner_height);
+        if self.review_log_scroll_offset == usize::MAX {
+            return;
+        }
+        let next = self.review_log_scroll_offset.saturating_add(lines);
+        self.review_log_scroll_offset = if next >= tail { usize::MAX } else { next };
     }
 
     pub fn dag_scroll_up(&mut self) {
@@ -506,6 +559,8 @@ impl App {
                         active.logs.remove(0);
                     }
                 }
+                // Ensure entry exists; usize::MAX means "follow tail" (clamped at render)
+                self.log_scroll_offsets.entry(id).or_insert(usize::MAX);
             }
 
             BaroEvent::StoryComplete {
