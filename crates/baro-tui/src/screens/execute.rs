@@ -48,7 +48,7 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(60),
-            Constraint::Length(36),
+            Constraint::Length(40),
         ])
         .split(area);
 
