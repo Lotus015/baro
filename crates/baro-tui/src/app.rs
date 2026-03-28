@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use crate::events::{BaroEvent, DoneStats};
 
-const MAX_LOG_LINES: usize = 200;
+use crate::constants::MAX_LOG_LINES;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Screen {

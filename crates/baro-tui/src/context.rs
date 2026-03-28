@@ -8,7 +8,7 @@ use tokio::process::Command;
 /// Build a CLAUDE.md context string by scanning the project at `cwd`.
 pub async fn build_context(cwd: &Path) -> Result<String, Box<dyn Error + Send + Sync>> {
     let tech_stack = detect_tech_stack(cwd).await;
-    let dir_tree = build_directory_tree(cwd, cwd, 0, 3).await;
+    let dir_tree = build_directory_tree(cwd, cwd, 0, crate::constants::DIRECTORY_TREE_DEPTH).await;
     let entry_points = find_entry_points(cwd).await;
     let build_commands = detect_build_commands(cwd).await;
     let conventions = detect_conventions(cwd).await;
