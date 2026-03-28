@@ -1,4 +1,5 @@
 mod app;
+mod constants;
 mod context;
 mod dag;
 mod events;
@@ -8,6 +9,8 @@ mod screens;
 mod theme;
 mod ui;
 mod utils;
+
+use utils::extract_json;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -187,9 +190,6 @@ async fn run_app(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     let cwd = std::fs::canonicalize(&cli.cwd)?;
-    let parallel = cli.parallel;
-    let timeout_secs = cli.timeout;
-
     app.parallel_limit = cli.parallel;
     app.timeout_secs = cli.timeout;
 
@@ -291,6 +291,7 @@ async fn run_app(
                 if matches!(ev, BaroEvent::NotificationReady) {
                     // Terminal bell works from inside alternate screen
                     print!("\x07");
+                    let _ = io::stdout().flush();
                     // OS notification via spawned process (works from alternate screen)
                     match std::env::consts::OS {
                         "macos" => {
@@ -433,11 +434,13 @@ async fn run_app(
                                         let mr = app.model_routing;
                                         let om = app.override_model.clone();
                                         let ctx = app.claude_md_content.clone();
+                                        let pl = app.parallel_limit;
+                                        let ts = app.timeout_secs;
                                         tokio::spawn(async move {
                                             if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
                                                 eprintln!("[baro] branch checkout failed: {}", e);
                                             }
-                                            spawn_executor(prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel, timeout_secs, model_routing: mr, override_model: om, context_content: ctx });
+                                            spawn_executor(prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx });
                                         });
                                     }
                                     Err(e) => {
@@ -467,11 +470,13 @@ async fn run_app(
                                     let mr = app.model_routing;
                                     let om = app.override_model.clone();
                                     let ctx = app.claude_md_content.clone();
+                                    let pl = app.parallel_limit;
+                                    let ts = app.timeout_secs;
                                     tokio::spawn(async move {
                                         if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
                                             eprintln!("[baro] branch creation failed: {}", e);
                                         }
-                                        spawn_executor(exec_prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel, timeout_secs, model_routing: mr, override_model: om, context_content: ctx });
+                                        spawn_executor(exec_prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx });
                                     });
                                 }
                             }
@@ -794,25 +799,3 @@ async fn run_openai_planner(goal: &str, cwd: &Path) -> Result<(Vec<ReviewStory>,
     Ok((stories, prd.project, prd.branch_name, prd.description))
 }
 
-fn extract_json(text: &str) -> String {
-    if let Some(start) = text.find("```json") {
-        let after = &text[start + 7..];
-        if let Some(end) = after.find("```") {
-            return after[..end].trim().to_string();
-        }
-    }
-    if let Some(start) = text.find("```") {
-        let after = &text[start + 3..];
-        if let Some(end) = after.find("```") {
-            return after[..end].trim().to_string();
-        }
-    }
-
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
-            return text[start..=end].to_string();
-        }
-    }
-
-    text.trim().to_string()
-}
