@@ -1,5 +1,12 @@
 #!/usr/bin/env sh
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve symlinks to find the real script directory (where baro-native lives)
+SELF="$0"
+while [ -L "$SELF" ]; do
+    DIR="$(cd "$(dirname "$SELF")" && pwd)"
+    SELF="$(readlink "$SELF")"
+    case "$SELF" in /*) ;; *) SELF="$DIR/$SELF" ;; esac
+done
+SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 NATIVE="$SCRIPT_DIR/baro-native"
 if [ -x "$NATIVE" ]; then
     exec "$NATIVE" "$@"
