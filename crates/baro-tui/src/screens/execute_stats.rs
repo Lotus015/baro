@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::{App, StoryStatus};
 use crate::theme;
+use crate::utils::format_commas;
 
 pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     let has_bar_data = app.stories.iter().any(|s| s.duration_secs.is_some());
@@ -47,18 +48,6 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     let total_files_created: u32 = app.stories.iter().map(|s| s.files_created).sum();
     let total_files_modified: u32 = app.stories.iter().map(|s| s.files_modified).sum();
     let final_stats = app.final_stats.as_ref();
-
-    let format_commas = |n: u64| -> String {
-        let s = n.to_string();
-        let mut result = String::new();
-        for (i, c) in s.chars().rev().enumerate() {
-            if i > 0 && i % 3 == 0 {
-                result.push(',');
-            }
-            result.push(c);
-        }
-        result.chars().rev().collect()
-    };
 
     // -- Time saved calculation (per-level parallelism gain) --
     let (level_saved, sequential_time) = {

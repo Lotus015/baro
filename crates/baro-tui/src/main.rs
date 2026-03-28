@@ -7,6 +7,7 @@ mod git;
 mod screens;
 mod theme;
 mod ui;
+mod utils;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

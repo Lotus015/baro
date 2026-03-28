@@ -11,6 +11,7 @@ use tokio::time::timeout;
 use crate::app::ReviewStory;
 use crate::dag::build_dag;
 use crate::events::BaroEvent;
+use crate::utils::format_commas;
 
 // ─── PRD types (for reading/writing prd.json) ───────────────
 
@@ -125,17 +126,6 @@ fn build_prompt(story: &PrdStory, cwd: &Path, context: Option<&str>) -> String {
 
 // ─── Claude stream-json parser ──────────────────────────────
 
-fn format_with_commas(n: u64) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
-}
 
 struct ParseResult {
     logs: Vec<String>,
@@ -1476,8 +1466,8 @@ pub async fn run_executor(
             parallelism_stats,
             total_files_created,
             total_files_modified,
-            format_with_commas(total_input_tokens),
-            format_with_commas(total_output_tokens),
+            format_commas(total_input_tokens),
+            format_commas(total_output_tokens),
             completed,
             current_prd.user_stories.len(),
             skipped
