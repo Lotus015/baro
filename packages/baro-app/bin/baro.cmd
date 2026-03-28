@@ -1,6 +1,5 @@
 @echo off
-set "SCRIPT_DIR=%~dp0"
-set "NATIVE=%SCRIPT_DIR%baro-native.exe"
+set "NATIVE=%USERPROFILE%\.baro\bin\baro.exe"
 if exist "%NATIVE%" (
     "%NATIVE%" %*
 ) else (

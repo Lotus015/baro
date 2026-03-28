@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 /**
  * Postinstall script - downloads the baro binary for the current platform.
- * Binary is fetched from GitHub Releases and saved as baro-native (not baro)
- * so the package directory only contains small npm-managed files, avoiding
- * ENOTEMPTY errors on upgrade.
+ * Binary is stored in ~/.baro/bin/ (outside the npm package directory)
+ * to avoid ENOTEMPTY errors when npm upgrades the package.
  */
 
 import * as fs from "fs"
 import * as path from "path"
 import { fileURLToPath } from "url"
 import * as https from "https"
+import * as os from "os"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PACKAGE_ROOT = path.resolve(__dirname, "..")
-const BIN_DIR = path.join(PACKAGE_ROOT, "bin")
-const NATIVE_NAME = process.platform === "win32" ? "baro-native.exe" : "baro-native"
+const BARO_HOME = path.join(os.homedir(), ".baro", "bin")
+const BINARY_NAME = process.platform === "win32" ? "baro.exe" : "baro"
 const REPO = "Lotus015/baro"
 
 function getPlatformKey() {
@@ -66,7 +66,7 @@ async function download(url, dest) {
 }
 
 async function main() {
-    const nativePath = path.join(BIN_DIR, NATIVE_NAME)
+    const binaryPath = path.join(BARO_HOME, BINARY_NAME)
     const platformKey = getPlatformKey()
     const version = getVersion()
 
@@ -77,17 +77,17 @@ async function main() {
 
     console.log(`Downloading baro for ${platformKey}...`)
 
-    fs.mkdirSync(BIN_DIR, { recursive: true })
+    fs.mkdirSync(BARO_HOME, { recursive: true })
 
-    // Clean up old binary (from previous versions or failed installs)
-    try { fs.unlinkSync(nativePath) } catch {}
+    // Clean up old binary
+    try { fs.unlinkSync(binaryPath) } catch {}
 
     try {
-        await download(url, nativePath)
+        await download(url, binaryPath)
         if (process.platform !== "win32") {
-            fs.chmodSync(nativePath, 0o755)
+            fs.chmodSync(binaryPath, 0o755)
         }
-        console.log(`baro installed successfully`)
+        console.log(`baro installed to ${BARO_HOME}`)
     } catch (err) {
         console.warn(`Warning: Could not download baro: ${err.message}`)
         console.warn(`  Build manually: cargo build --release -p baro-tui`)
