@@ -1,3 +1,5 @@
+pub(crate) type BaroResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
 /// Extract JSON from text that may be wrapped in markdown code fences.
 pub(crate) fn extract_json(text: &str) -> String {
     if let Some(start) = text.find("```json") {

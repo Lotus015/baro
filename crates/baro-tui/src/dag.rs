@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::executor::PrdStory;
+use crate::utils::BaroResult;
 
 pub(crate) struct DagLevel {
     pub story_ids: Vec<String>,
 }
 
 /// Build DAG levels from ALL stories (for stats/PR body after completion).
-pub(crate) fn build_dag_all(stories: &[PrdStory]) -> Result<Vec<DagLevel>, String> {
+pub(crate) fn build_dag_all(stories: &[PrdStory]) -> BaroResult<Vec<DagLevel>> {
     let story_map: HashMap<&str, &PrdStory> =
         stories.iter().map(|s| (s.id.as_str(), s)).collect();
 
@@ -68,14 +69,14 @@ pub(crate) fn build_dag_all(stories: &[PrdStory]) -> Result<Vec<DagLevel>, Strin
             .filter(|s| !placed.contains(s.id.as_str()))
             .map(|s| s.id.as_str())
             .collect();
-        return Err(format!("Dependency cycle detected: {}", cycled.join(", ")));
+        return Err(format!("Dependency cycle detected: {}", cycled.join(", ")).into());
     }
 
     Ok(levels)
 }
 
 /// Build DAG levels from only incomplete stories (for execution).
-pub(crate) fn build_dag(stories: &[PrdStory]) -> Result<Vec<DagLevel>, String> {
+pub(crate) fn build_dag(stories: &[PrdStory]) -> BaroResult<Vec<DagLevel>> {
     let incomplete: Vec<&PrdStory> = stories.iter().filter(|s| !s.passes).collect();
     let completed_ids: HashSet<&str> = stories
         .iter()
@@ -144,7 +145,7 @@ pub(crate) fn build_dag(stories: &[PrdStory]) -> Result<Vec<DagLevel>, String> {
             .filter(|s| !placed.contains(s.id.as_str()))
             .map(|s| s.id.as_str())
             .collect();
-        return Err(format!("Dependency cycle detected: {}", cycled.join(", ")));
+        return Err(format!("Dependency cycle detected: {}", cycled.join(", ")).into());
     }
 
     Ok(levels)

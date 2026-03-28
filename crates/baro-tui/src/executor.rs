@@ -11,7 +11,7 @@ use tokio::time::timeout;
 use crate::app::ReviewStory;
 use crate::dag::build_dag;
 use crate::events::BaroEvent;
-use crate::utils::{extract_json, format_commas};
+use crate::utils::{extract_json, format_commas, BaroResult};
 
 // ─── PRD types (for reading/writing prd.json) ───────────────
 
@@ -260,7 +260,7 @@ async fn execute_story(
     tx: &mpsc::Sender<BaroEvent>,
     git_mutex: &Mutex<()>,
     cfg: StoryExecConfig<'_>,
-) -> Result<(u64, u32, u32, u64, u64), String> {
+) -> BaroResult<(u64, u32, u32, u64, u64)> {
     let StoryExecConfig { timeout_secs, model, context } = cfg;
     let max_attempts = story.retries + 1;
 
@@ -314,7 +314,7 @@ async fn execute_story(
                     crate::git::git_push_with_retry(git_mutex, cwd, &story.id, tx).await;
                 let (push_success, push_error) = match &push_result {
                     Ok(()) => (true, None),
-                    Err(e) => (false, Some(e.clone())),
+                    Err(e) => (false, Some(e.to_string())),
                 };
                 let _ = tx
                     .send(BaroEvent::PushStatus {
@@ -330,7 +330,7 @@ async fn execute_story(
                 let _ = tx
                     .send(BaroEvent::StoryError {
                         id: story.id.clone(),
-                        error: err.clone(),
+                        error: err.to_string(),
                         attempt,
                         max_retries: max_attempts,
                     })
@@ -350,7 +350,7 @@ async fn execute_story(
         }
     }
 
-    Err("All attempts exhausted".to_string())
+    Err("All attempts exhausted".into())
 }
 
 async fn run_claude_for_story(
@@ -360,7 +360,7 @@ async fn run_claude_for_story(
     tx: &mpsc::Sender<BaroEvent>,
     timeout_secs: u64,
     model: &Option<String>,
-) -> Result<(u64, u64), String> {
+) -> BaroResult<(u64, u64)> {
     let mut args = vec![
         "--dangerously-skip-permissions",
         "--output-format",
@@ -448,7 +448,7 @@ async fn run_claude_for_story(
             .wait()
             .await
             .map_err(|e| format!("Failed to wait for claude: {}", e))?;
-        Ok::<_, String>((status, token_totals))
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>((status, token_totals))
     })
     .await;
 
@@ -458,7 +458,7 @@ async fn run_claude_for_story(
             if status.success() {
                 Ok(token_totals)
             } else {
-                Err(format!("claude exited with code {}", status.code().unwrap_or(-1)))
+                Err(format!("claude exited with code {}", status.code().unwrap_or(-1)).into())
             }
         }
         Err(_) => {
@@ -469,7 +469,7 @@ async fn run_claude_for_story(
                     line: format!("[timeout] Story {} killed after {}s", story_id, timeout_secs),
                 })
                 .await;
-            Err(format!("Story timed out after {}s", timeout_secs))
+            Err(format!("Story timed out after {}s", timeout_secs).into())
         }
     }
 }
@@ -1284,7 +1284,7 @@ pub async fn run_executor(
                 return Err(format!(
                     "git add prd.json failed: {}",
                     String::from_utf8_lossy(&add.stderr)
-                ));
+                ).into());
             }
 
             let commit = Command::new("git")
@@ -1296,7 +1296,7 @@ pub async fn run_executor(
             if !commit.status.success() {
                 let stderr = String::from_utf8_lossy(&commit.stderr);
                 if !stderr.contains("nothing to commit") {
-                    return Err(format!("git commit failed: {}", stderr));
+                    return Err(format!("git commit failed: {}", stderr).into());
                 }
             }
         }

@@ -4,11 +4,12 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::events::BaroEvent;
+use crate::utils::BaroResult;
 use tokio::sync::mpsc;
 
 // ─── Get current branch ──────────────────────────────────────
 
-pub(crate) async fn get_current_branch(cwd: &Path) -> Result<String, String> {
+pub(crate) async fn get_current_branch(cwd: &Path) -> BaroResult<String> {
     let output = Command::new("git")
         .args(["branch", "--show-current"])
         .current_dir(cwd)
@@ -18,14 +19,14 @@ pub(crate) async fn get_current_branch(cwd: &Path) -> Result<String, String> {
 
     let branch_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if branch_name.is_empty() {
-        return Err("Could not determine current branch".to_string());
+        return Err("Could not determine current branch".into());
     }
     Ok(branch_name)
 }
 
 // ─── Create or checkout branch ───────────────────────────────
 
-pub async fn create_or_checkout_branch(cwd: &Path, branch_name: &str) -> Result<(), String> {
+pub async fn create_or_checkout_branch(cwd: &Path, branch_name: &str) -> BaroResult<()> {
     // Try creating a new branch
     let create = Command::new("git")
         .args(["checkout", "-b", branch_name])
@@ -45,7 +46,7 @@ pub async fn create_or_checkout_branch(cwd: &Path, branch_name: &str) -> Result<
 
         if !checkout.status.success() {
             let stderr = String::from_utf8_lossy(&checkout.stderr).trim().to_string();
-            return Err(format!("Failed to checkout branch '{}': {}", branch_name, stderr));
+            return Err(format!("Failed to checkout branch '{}': {}", branch_name, stderr).into());
         }
     }
 
@@ -241,7 +242,7 @@ pub(crate) async fn git_push_with_retry(
     cwd: &Path,
     story_id: &str,
     tx: &mpsc::Sender<BaroEvent>,
-) -> Result<(), String> {
+) -> BaroResult<()> {
     let _git_lock = git_mutex.lock().await;
 
     // Check if remote exists
@@ -324,7 +325,7 @@ pub(crate) async fn git_push_with_retry(
                     line: "[git] conflict detected, skipping".to_string(),
                 })
                 .await;
-            return Err("Rebase conflict detected, push skipped".to_string());
+            return Err("Rebase conflict detected, push skipped".into());
         }
     }
 
@@ -334,5 +335,5 @@ pub(crate) async fn git_push_with_retry(
             line: "[git] push failed after 3 attempts".to_string(),
         })
         .await;
-    Err(format!("Push failed after 3 attempts: {}", last_stderr))
+    Err(format!("Push failed after 3 attempts: {}", last_stderr).into())
 }
