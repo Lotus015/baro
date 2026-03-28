@@ -244,8 +244,17 @@ async fn run_app(
                 app.start_planning();
                 spawn_planner(&app, &cwd, tx.clone());
             } else {
-                app.start_context();
-                spawn_context_builder(&cwd, tx.clone());
+                let claude_md_path = cwd.join("CLAUDE.md");
+                if claude_md_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&claude_md_path) {
+                        app.claude_md_content = Some(content);
+                    }
+                    app.start_planning();
+                    spawn_planner(&app, &cwd, tx.clone());
+                } else {
+                    app.start_context();
+                    spawn_context_builder(&cwd, tx.clone());
+                }
             }
         }
     }
@@ -346,8 +355,17 @@ async fn run_app(
                                     app.start_planning();
                                     spawn_planner(&app, &cwd, tx.clone());
                                 } else {
-                                    app.start_context();
-                                    spawn_context_builder(&cwd, tx.clone());
+                                    let claude_md_path = cwd.join("CLAUDE.md");
+                                    if claude_md_path.exists() {
+                                        if let Ok(content) = std::fs::read_to_string(&claude_md_path) {
+                                            app.claude_md_content = Some(content);
+                                        }
+                                        app.start_planning();
+                                        spawn_planner(&app, &cwd, tx.clone());
+                                    } else {
+                                        app.start_context();
+                                        spawn_context_builder(&cwd, tx.clone());
+                                    }
                                 }
                             }
                         }
@@ -510,25 +528,19 @@ fn spawn_planner(app: &App, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
 fn spawn_context_builder(cwd: &Path, tx: mpsc::Sender<AppEvent>) {
     let cwd = cwd.to_path_buf();
     tokio::spawn(async move {
-        let claude_md_path = cwd.join("CLAUDE.md");
-        let content = if claude_md_path.exists() {
-            match tokio::fs::read_to_string(&claude_md_path).await {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = tx.send(AppEvent::ContextError(format!("Failed to read CLAUDE.md: {}", e))).await;
+        match context::build_context(&cwd).await {
+            Ok(content) => {
+                let claude_md_path = cwd.join("CLAUDE.md");
+                if let Err(e) = tokio::fs::write(&claude_md_path, &content).await {
+                    let _ = tx.send(AppEvent::ContextError(format!("Failed to write CLAUDE.md: {}", e))).await;
                     return;
                 }
+                let _ = tx.send(AppEvent::ContextReady(content)).await;
             }
-        } else {
-            match context::build_context(&cwd).await {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = tx.send(AppEvent::ContextError(format!("Failed to build context: {}", e))).await;
-                    return;
-                }
+            Err(e) => {
+                let _ = tx.send(AppEvent::ContextError(format!("Failed to build context: {}", e))).await;
             }
-        };
-        let _ = tx.send(AppEvent::ContextReady(content)).await;
+        }
     });
 }
 
