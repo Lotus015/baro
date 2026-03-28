@@ -11,7 +11,6 @@ use crate::theme;
 
 pub fn render_completion(f: &mut Frame, app: &App) {
     let area = f.area();
-    let box_width = 50u16.min(area.width.saturating_sub(4));
 
     let stats = app.final_stats.as_ref();
     let completed = stats.map(|s| s.stories_completed).unwrap_or(app.completed);
@@ -70,6 +69,30 @@ pub fn render_completion(f: &mut Frame, app: &App) {
     } else {
         1.0
     };
+
+    // Dynamic width: measure the longest content lines, clamp to [50, 80]
+    let label_width: usize = 18; // e.g. "  PR:             " or "  Time saved:     "
+
+    let time_saved_content_width: usize = if saved_secs > 0 {
+        let value = format!(
+            "{}:{:02} with parallel execution ({:.1}x speedup)",
+            saved_secs / 60,
+            saved_secs % 60,
+            multiplier
+        );
+        label_width + value.len()
+    } else {
+        0
+    };
+
+    let pr_url_content_width: usize = app
+        .pr_url
+        .as_ref()
+        .map_or(0, |url| label_width + url.len());
+
+    let max_content_width = time_saved_content_width.max(pr_url_content_width);
+    let needed_box_width = (max_content_width + 2) as u16; // +2 for borders
+    let box_width = needed_box_width.max(50).min(80).min(area.width.saturating_sub(4));
 
     // Box height: 16 base lines (14 content + 2 borders) + optional Time saved + optional PR URL
     let time_saved_extra: u16 = if saved_secs > 0 { 1 } else { 0 };
