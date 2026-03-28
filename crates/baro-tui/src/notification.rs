@@ -2,14 +2,28 @@ use std::io::{self, Write};
 
 /// Send a completion notification: terminal bell + OS-specific notification.
 pub fn notify_completion() {
-    // Terminal bell works from inside alternate screen
+    // Terminal bell
     print!("\x07");
+    // OSC 9 notification (supported by Ghostty, iTerm2, Windows Terminal)
+    print!("\x1b]9;All stories complete\x1b\\");
     let _ = io::stdout().flush();
 
     // OS-specific notification
     match std::env::consts::OS {
         "macos" => {
-            notify_macos_dock();
+            // Banner notification
+            let _ = std::process::Command::new("osascript")
+                .args(["-e", "display notification \"All stories complete\" with title \"baro\""])
+                .spawn();
+            // Bounce dock icon
+            let _ = std::process::Command::new("osascript")
+                .args(["-e", concat!(
+                    "tell application \"System Events\"\n",
+                    "  set frontApp to name of first application process whose frontmost is true\n",
+                    "end tell\n",
+                    "tell application frontApp to activate"
+                )])
+                .spawn();
         }
         "linux" => {
             let _ = std::process::Command::new("notify-send")
@@ -25,38 +39,6 @@ pub fn notify_completion() {
     }
 }
 
-/// Clear the macOS dock badge label. No-op on other platforms.
-pub fn clear_badge() {
-    #[cfg(target_os = "macos")]
-    {
-        use objc2::MainThreadMarker;
-        use objc2_app_kit::NSApplication;
-
-        let mtm = unsafe { MainThreadMarker::new_unchecked() };
-        let app = NSApplication::sharedApplication(mtm);
-        let dock_tile = app.dockTile();
-        dock_tile.setBadgeLabel(None);
-    }
-}
-
-/// Bounce the dock icon and set a badge label on macOS using native AppKit APIs.
-#[cfg(target_os = "macos")]
-fn notify_macos_dock() {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSApplication, NSRequestUserAttentionType};
-    use objc2_foundation::NSString;
-
-    // We must be on the main thread to interact with NSApplication.
-    // In a TUI context the main thread is available but not running an NSRunLoop,
-    // so we use an unchecked marker.
-    let mtm = unsafe { MainThreadMarker::new_unchecked() };
-    let app = NSApplication::sharedApplication(mtm);
-    app.requestUserAttention(NSRequestUserAttentionType::CriticalRequest);
-    let dock_tile = app.dockTile();
-    let label = NSString::from_str("!");
-    dock_tile.setBadgeLabel(Some(&label));
-}
-
-/// No-op on non-macOS platforms.
-#[cfg(not(target_os = "macos"))]
-fn notify_macos_dock() {}
+/// Clear the dock badge. Currently a no-op — badge clearing is handled
+/// by the terminal itself when the user focuses the window.
+pub fn clear_badge() {}
