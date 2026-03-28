@@ -1177,25 +1177,96 @@ async fn create_pull_request(
     pr_data: &PrData,
 ) -> Option<String> {
     // Check if gh CLI is available
-    let gh_check = Command::new("gh")
-        .arg("--version")
-        .output()
-        .await
-        .ok()?;
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: "finalize".to_string(),
+            line: "[pr] checking gh CLI availability...".to_string(),
+        })
+        .await;
+    let gh_check = match Command::new("gh").arg("--version").output().await {
+        Ok(output) => output,
+        Err(e) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[pr] gh CLI not available: {}", e),
+                })
+                .await;
+            return None;
+        }
+    };
+    let gh_stdout = String::from_utf8_lossy(&gh_check.stdout).trim().to_string();
+    let gh_stderr = String::from_utf8_lossy(&gh_check.stderr).trim().to_string();
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: "finalize".to_string(),
+            line: format!("[pr] gh --version stdout: {}", gh_stdout),
+        })
+        .await;
+    if !gh_stderr.is_empty() {
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: "finalize".to_string(),
+                line: format!("[pr] gh --version stderr: {}", gh_stderr),
+            })
+            .await;
+    }
     if !gh_check.status.success() {
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: "finalize".to_string(),
+                line: "[pr] gh CLI not available (non-zero exit)".to_string(),
+            })
+            .await;
         return None;
     }
 
     // Get current branch
-    let branch = crate::git::get_current_branch(cwd).await.ok()?;
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: "finalize".to_string(),
+            line: "[pr] getting current branch...".to_string(),
+        })
+        .await;
+    let branch = match crate::git::get_current_branch(cwd).await {
+        Ok(b) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[pr] current branch: {}", b),
+                })
+                .await;
+            b
+        }
+        Err(e) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[pr] failed to get current branch: {}", e),
+                })
+                .await;
+            return None;
+        }
+    };
 
     // Check if remote branch exists
-    let ls_remote = Command::new("git")
+    let ls_remote = match Command::new("git")
         .args(["ls-remote", "--heads", "origin", &branch])
         .current_dir(cwd)
         .output()
         .await
-        .ok()?;
+    {
+        Ok(output) => output,
+        Err(e) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[git] ls-remote failed: {}", e),
+                })
+                .await;
+            return None;
+        }
+    };
     let remote_branch_exists = ls_remote.status.success()
         && !String::from_utf8_lossy(&ls_remote.stdout).trim().is_empty();
 
@@ -1232,12 +1303,23 @@ async fn create_pull_request(
             })
             .await;
 
-        let push_output = Command::new("git")
+        let push_output = match Command::new("git")
             .args(["push", "-u", "origin", &branch])
             .current_dir(cwd)
             .output()
             .await
-            .ok()?;
+        {
+            Ok(output) => output,
+            Err(e) => {
+                let _ = tx
+                    .send(BaroEvent::StoryLog {
+                        id: "finalize".to_string(),
+                        line: format!("[git] push -u failed to spawn: {}", e),
+                    })
+                    .await;
+                return None;
+            }
+        };
 
         if push_output.status.success() {
             let _ = tx
@@ -1258,12 +1340,23 @@ async fn create_pull_request(
     }
 
     // Check if a PR already exists for this branch
-    let pr_view = Command::new("gh")
+    let pr_view = match Command::new("gh")
         .args(["pr", "view", &branch, "--json", "url", "--jq", ".url"])
         .current_dir(cwd)
         .output()
         .await
-        .ok()?;
+    {
+        Ok(output) => output,
+        Err(e) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[pr] failed to check existing PR: {}", e),
+                })
+                .await;
+            return None;
+        }
+    };
 
     if pr_view.status.success() {
         let existing_url = String::from_utf8_lossy(&pr_view.stdout).trim().to_string();
@@ -1279,10 +1372,45 @@ async fn create_pull_request(
     }
 
     // Re-read prd.json from disk for up-to-date completion status
-    let prd_data = tokio::fs::read_to_string(cwd.join("prd.json"))
-        .await
-        .ok()?;
-    let current_prd: PrdFile = serde_json::from_str(&prd_data).ok()?;
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: "finalize".to_string(),
+            line: "[pr] re-reading prd.json...".to_string(),
+        })
+        .await;
+    let prd_data = match tokio::fs::read_to_string(cwd.join("prd.json")).await {
+        Ok(data) => data,
+        Err(e) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[pr] failed to read prd.json: {}", e),
+                })
+                .await;
+            return None;
+        }
+    };
+    let current_prd: PrdFile = match serde_json::from_str(&prd_data) {
+        Ok(prd) => prd,
+        Err(e) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[pr] failed to parse prd.json: {}", e),
+                })
+                .await;
+            return None;
+        }
+    };
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: "finalize".to_string(),
+            line: format!(
+                "[pr] prd.json loaded: {} stories",
+                current_prd.user_stories.len()
+            ),
+        })
+        .await;
 
     // Calculate per-level parallelism gain using DAG (use all stories, not just incomplete)
     let dag_levels = crate::dag::build_dag_all(&current_prd.user_stories).unwrap_or_default();
@@ -1398,39 +1526,109 @@ async fn create_pull_request(
          — Background Agent Runtime Orchestrator\n",
     );
 
-    let pr_output = Command::new("gh")
-        .args([
-            "pr",
-            "create",
-            "--title",
-            &pr_data.project,
-            "--body",
-            &body,
-            "--base",
-            "main",
-            "--head",
-            &branch,
-        ])
+    let pr_args = [
+        "pr",
+        "create",
+        "--title",
+        &pr_data.project,
+        "--body",
+        &body,
+        "--base",
+        "main",
+        "--head",
+        &branch,
+    ];
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: "finalize".to_string(),
+            line: format!("[pr] running: gh {}", pr_args.join(" ")),
+        })
+        .await;
+
+    let pr_output = match Command::new("gh")
+        .args(&pr_args)
         .current_dir(cwd)
         .output()
         .await
-        .ok()?;
-
-    if pr_output.status.success() {
-        let stdout = String::from_utf8_lossy(&pr_output.stdout)
-            .trim()
-            .to_string();
-        if stdout.is_empty() {
-            None
-        } else {
-            Some(stdout)
+    {
+        Ok(output) => output,
+        Err(e) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[pr] failed to spawn gh pr create: {}", e),
+                })
+                .await;
+            return None;
         }
-    } else {
-        let stderr = String::from_utf8_lossy(&pr_output.stderr);
+    };
+
+    let stdout = String::from_utf8_lossy(&pr_output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&pr_output.stderr).trim().to_string();
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: "finalize".to_string(),
+            line: format!("[pr] gh pr create stdout: {}", stdout),
+        })
+        .await;
+    if !stderr.is_empty() {
         let _ = tx
             .send(BaroEvent::StoryLog {
                 id: "finalize".to_string(),
-                line: format!("PR creation failed: {}", stderr),
+                line: format!("[pr] gh pr create stderr: {}", stderr),
+            })
+            .await;
+    }
+
+    if pr_output.status.success() {
+        if stdout.is_empty() {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: "[pr] gh pr create succeeded but returned empty stdout".to_string(),
+                })
+                .await;
+            None
+        } else {
+            // Verify PR by running gh pr view
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: "[pr] verifying PR with gh pr view...".to_string(),
+                })
+                .await;
+            match Command::new("gh")
+                .args(["pr", "view", "--json", "url", "--jq", ".url"])
+                .current_dir(cwd)
+                .output()
+                .await
+            {
+                Ok(verify_output) => {
+                    let verified_url =
+                        String::from_utf8_lossy(&verify_output.stdout).trim().to_string();
+                    let _ = tx
+                        .send(BaroEvent::StoryLog {
+                            id: "finalize".to_string(),
+                            line: format!("[pr] verified PR URL: {}", verified_url),
+                        })
+                        .await;
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(BaroEvent::StoryLog {
+                            id: "finalize".to_string(),
+                            line: format!("[pr] PR verification failed: {}", e),
+                        })
+                        .await;
+                }
+            }
+            Some(stdout)
+        }
+    } else {
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: "finalize".to_string(),
+                line: format!("[pr] PR creation failed (exit {}): {}", pr_output.status, stderr),
             })
             .await;
         None
