@@ -3,7 +3,7 @@ use ratatui::Frame;
 use crate::app::{App, Screen};
 use crate::screens;
 
-pub fn render(f: &mut Frame, app: &App) {
+pub fn render(f: &mut Frame, app: &mut App) {
     match app.screen {
         Screen::Welcome => screens::welcome::render(f, app),
         Screen::Context => screens::context::render(f, app),

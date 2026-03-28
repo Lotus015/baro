@@ -13,7 +13,7 @@ use crate::app::{App, StoryStatus};
 use crate::theme;
 use crate::utils::format_token_display;
 
-pub fn render_dashboard(f: &mut Frame, app: &App, area: Rect) {
+pub fn render_dashboard(f: &mut Frame, app: &mut App, area: Rect) {
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -26,7 +26,7 @@ pub fn render_dashboard(f: &mut Frame, app: &App, area: Rect) {
     render_logs(f, app, main_chunks[1]);
 }
 
-fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
+fn render_story_list(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(4), Constraint::Length(2)])
@@ -70,16 +70,22 @@ fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
-            .title(Span::styled(
-                " Stories ",
-                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
-            )),
-    );
-    f.render_widget(list, chunks[0]);
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme::BORDER))
+                .title(Span::styled(
+                    " Stories ",
+                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                )),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(theme::BORDER)
+                .add_modifier(Modifier::BOLD),
+        );
+    f.render_stateful_widget(list, chunks[0], &mut app.story_list_state);
 
     // Stats area: wall time + token counter
     let elapsed = app.total_time_secs;

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use ratatui::widgets::ListState;
+
 use crate::events::{BaroEvent, DoneStats};
 
 use crate::constants::MAX_LOG_LINES;
@@ -170,6 +172,7 @@ pub struct App {
     pub global_tab: GlobalTab,
     pub selected_log_index: usize,
     pub tick_count: u64,
+    pub story_list_state: ListState,
 }
 
 impl App {
@@ -223,6 +226,7 @@ impl App {
             global_tab: GlobalTab::Dashboard,
             selected_log_index: 0,
             tick_count: 0,
+            story_list_state: ListState::default(),
         }
     }
 
@@ -287,6 +291,68 @@ impl App {
             } else {
                 self.selected_log_index - 1
             };
+        }
+    }
+
+    pub fn story_list_scroll_up(&mut self) {
+        let i = self.story_list_state.selected().unwrap_or(0);
+        self.story_list_state.select(Some(i.saturating_sub(1)));
+    }
+
+    pub fn story_list_scroll_down(&mut self, item_count: usize) {
+        let i = self.story_list_state.selected().unwrap_or(0);
+        let next = if item_count == 0 { 0 } else { (i + 1).min(item_count - 1) };
+        self.story_list_state.select(Some(next));
+    }
+
+    pub fn story_list_item_count(&self) -> usize {
+        if self.dag_levels.is_empty() {
+            self.stories.len()
+        } else {
+            let mut count = 0;
+            for (i, level) in self.dag_levels.iter().enumerate() {
+                count += 1; // level header
+                count += level.len(); // stories in level
+                if self.review_in_progress && self.review_level == i {
+                    count += 1; // review spinner
+                }
+                if i < self.dag_levels.len() - 1 {
+                    count += 1; // separator
+                }
+            }
+            count
+        }
+    }
+
+    pub fn auto_scroll_to_running(&mut self) {
+        let mut index = 0;
+        if self.dag_levels.is_empty() {
+            for story in &self.stories {
+                if story.status == StoryStatus::Running {
+                    self.story_list_state.select(Some(index));
+                    return;
+                }
+                index += 1;
+            }
+        } else {
+            for (i, level) in self.dag_levels.iter().enumerate() {
+                index += 1; // level header
+                for story_id in level {
+                    if let Some(story) = self.stories.iter().find(|s| s.id == *story_id) {
+                        if story.status == StoryStatus::Running {
+                            self.story_list_state.select(Some(index));
+                            return;
+                        }
+                    }
+                    index += 1;
+                }
+                if self.review_in_progress && self.review_level == i {
+                    index += 1;
+                }
+                if i < self.dag_levels.len() - 1 {
+                    index += 1;
+                }
+            }
         }
     }
 
