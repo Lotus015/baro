@@ -638,6 +638,15 @@ impl App {
 
             BaroEvent::FinalizeStart => {
                 self.finalize_in_progress = true;
+                self.active_stories.insert(
+                    "finalize".to_string(),
+                    ActiveStory {
+                        id: "finalize".to_string(),
+                        title: "Finalizing".to_string(),
+                        logs: Vec::new(),
+                        start_time: Instant::now(),
+                    },
+                );
             }
 
             BaroEvent::FinalizeComplete { pr_url } => {
