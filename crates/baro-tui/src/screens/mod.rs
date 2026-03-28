@@ -1,4 +1,5 @@
 pub mod welcome;
+pub mod context;
 pub mod planning;
 pub mod review;
 pub mod execute;

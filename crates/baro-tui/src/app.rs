@@ -101,6 +101,9 @@ pub struct App {
     // Welcome screen
     pub goal_input: String,
 
+    // Context building screen
+    pub claude_md_content: Option<String>,
+
     // Planning screen
     pub planning_start: Option<Instant>,
     pub planning_error: Option<String>,
@@ -177,6 +180,8 @@ impl App {
 
             goal_input: String::new(),
 
+            claude_md_content: None,
+
             planning_start: None,
             planning_error: None,
 
@@ -222,6 +227,11 @@ impl App {
     }
 
     // Screen transitions
+    pub fn start_context(&mut self) {
+        self.screen = Screen::Context;
+        self.tick_count = 0;
+    }
+
     pub fn start_planning(&mut self) {
         self.screen = Screen::Planning;
         self.planning_start = Some(Instant::now());

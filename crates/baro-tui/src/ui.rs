@@ -6,6 +6,7 @@ use crate::screens;
 pub fn render(f: &mut Frame, app: &App) {
     match app.screen {
         Screen::Welcome => screens::welcome::render(f, app),
+        Screen::Context => screens::context::render(f, app),
         Screen::Planning => screens::planning::render(f, app),
         Screen::Review => screens::review::render(f, app),
         Screen::Execute => screens::execute::render(f, app),

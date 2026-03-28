@@ -68,6 +68,8 @@ struct Cli {
 enum AppEvent {
     Baro(BaroEvent),
     Key(crossterm::event::KeyEvent),
+    ContextReady(String),
+    ContextError(String),
     PlanReady(Vec<ReviewStory>, String, String, String),
     PlanError(String),
     RefineReady(Vec<ReviewStory>, String, String, String),
@@ -233,12 +235,17 @@ async fn run_app(
         }
     }
 
-    // If goal provided via CLI (and not resuming), skip welcome and start planning immediately
+    // If goal provided via CLI (and not resuming), skip welcome and start context/planning
     if !entered_resume {
         if let Some(goal) = cli.goal {
             app.goal_input = goal;
-            app.start_planning();
-            spawn_planner(&app, &cwd, tx.clone());
+            if app.skip_context {
+                app.start_planning();
+                spawn_planner(&app, &cwd, tx.clone());
+            } else {
+                app.start_context();
+                spawn_context_builder(&cwd, tx.clone());
+            }
         }
     }
 
@@ -295,6 +302,14 @@ async fn run_app(
                 }
                 app.handle_event(ev);
             }
+            Some(AppEvent::ContextReady(content)) => {
+                app.claude_md_content = Some(content);
+                app.start_planning();
+                spawn_planner(&app, &cwd, tx.clone());
+            }
+            Some(AppEvent::ContextError(err)) => {
+                app.planning_error = Some(err);
+            }
             Some(AppEvent::PlanReady(stories, project, branch, description)) => {
                 app.project = project;
                 app.branch_name = branch;
@@ -326,13 +341,22 @@ async fn run_app(
                         KeyCode::Esc => return Ok(()),
                         KeyCode::Enter => {
                             if !app.goal_input.is_empty() {
-                                app.start_planning();
-                                spawn_planner(&app, &cwd, tx.clone());
+                                if app.skip_context {
+                                    app.start_planning();
+                                    spawn_planner(&app, &cwd, tx.clone());
+                                } else {
+                                    app.start_context();
+                                    spawn_context_builder(&cwd, tx.clone());
+                                }
                             }
                         }
                         KeyCode::Char(c) => app.goal_input.push(c),
                         KeyCode::Backspace => { app.goal_input.pop(); }
                         KeyCode::Left | KeyCode::Right => app.toggle_planner(),
+                        _ => {}
+                    },
+                    Screen::Context => match key.code {
+                        KeyCode::Esc | KeyCode::Char('q') => return Ok(()),
                         _ => {}
                     },
                     Screen::Planning => match key.code {
@@ -479,6 +503,25 @@ fn spawn_planner(app: &App, cwd: &Path, tx: mpsc::Sender<AppEvent>) {
                 let _ = tx.send(AppEvent::PlanError(e.to_string())).await;
             }
         }
+    });
+}
+
+fn spawn_context_builder(cwd: &Path, tx: mpsc::Sender<AppEvent>) {
+    let cwd = cwd.to_path_buf();
+    tokio::spawn(async move {
+        let claude_md_path = cwd.join("CLAUDE.md");
+        let content = if claude_md_path.exists() {
+            match tokio::fs::read_to_string(&claude_md_path).await {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = tx.send(AppEvent::ContextError(format!("Failed to read CLAUDE.md: {}", e))).await;
+                    return;
+                }
+            }
+        } else {
+            String::new()
+        };
+        let _ = tx.send(AppEvent::ContextReady(content)).await;
     });
 }
 
