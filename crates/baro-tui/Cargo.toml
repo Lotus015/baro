@@ -18,3 +18,8 @@ chrono = "0.4"
 
 [target.'cfg(unix)'.dependencies]
 crossterm = { version = "0.28", features = ["use-dev-tty"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSRunningApplication", "NSDockTile"] }

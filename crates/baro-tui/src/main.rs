@@ -6,6 +6,7 @@ mod dag;
 mod events;
 mod executor;
 mod git;
+mod notification;
 mod screens;
 mod theme;
 mod ui;
@@ -212,6 +213,7 @@ struct PrdStoryOutput {
     model: Option<String>,
 }
 
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -357,28 +359,7 @@ async fn run_app(
             Some(AppEvent::Baro(ev)) => {
                 // Fire notification immediately when stories complete
                 if matches!(ev, BaroEvent::NotificationReady) {
-                    // Terminal bell works from inside alternate screen
-                    print!("\x07");
-                    let _ = io::stdout().flush();
-                    // OS notification via spawned process (works from alternate screen)
-                    match std::env::consts::OS {
-                        "macos" => {
-                            let _ = std::process::Command::new("osascript")
-                                .args(["-e", "display notification \"All stories complete\" with title \"baro\""])
-                                .spawn();
-                        }
-                        "linux" => {
-                            let _ = std::process::Command::new("notify-send")
-                                .args(["baro", "All stories complete"])
-                                .spawn();
-                        }
-                        "windows" => {
-                            let _ = std::process::Command::new("powershell")
-                                .args(["-Command", "[console]::beep(1000,500)"])
-                                .spawn();
-                        }
-                        _ => {}
-                    }
+                    notification::notify_completion();
                 }
                 let story_start_id = if let BaroEvent::StoryStart { ref id, .. } = ev {
                     Some(id.clone())
@@ -432,6 +413,11 @@ async fn run_app(
                 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
                 if key.kind != KeyEventKind::Press {
                     continue;
+                }
+
+                // Clear dock badge when user returns to the terminal after a notification
+                if app.notification_ready {
+                    notification::clear_badge();
                 }
 
                 match app.screen {
