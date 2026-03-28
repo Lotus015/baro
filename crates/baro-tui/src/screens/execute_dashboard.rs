@@ -83,7 +83,7 @@ fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
 
     // Stats area: wall time + token counter
     let elapsed = app.total_time_secs;
-    let wall_time = format!(" ⏱ {}:{:02}", elapsed / 60, elapsed % 60);
+    let wall_time = format!(" {}:{:02}", elapsed / 60, elapsed % 60);
     let token_line = format!(" {}", format_token_display(app.total_input_tokens, app.total_output_tokens));
 
     let stats = Paragraph::new(vec![

@@ -8,7 +8,6 @@ use ratatui::{
 
 use crate::app::App;
 use crate::theme;
-use crate::utils::format_token_display;
 
 pub fn render_completion(f: &mut Frame, app: &App) {
     let area = f.area();
@@ -203,9 +202,13 @@ pub fn render_completion(f: &mut Frame, app: &App) {
     ]));
 
     lines.push(Line::from(vec![
-        Span::styled("  ", Style::default()),
+        Span::styled("  Tokens:         ", Style::default().fg(theme::MUTED)),
         Span::styled(
-            format_token_display(app.total_input_tokens, app.total_output_tokens),
+            format!(
+                "{} in / {} out",
+                crate::utils::format_commas(app.total_input_tokens),
+                crate::utils::format_commas(app.total_output_tokens)
+            ),
             Style::default().fg(theme::ACCENT),
         ),
     ]));

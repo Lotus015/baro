@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::app::{App, StoryStatus};
 use crate::theme;
-use crate::utils::{calculate_cost, format_commas};
+use crate::utils::format_commas;
 
 pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
     let has_bar_data = app.stories.iter().any(|s| s.duration_secs.is_some());
@@ -162,7 +162,6 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
 
     // Tokens line
     if app.total_input_tokens > 0 || app.total_output_tokens > 0 {
-        let cost = calculate_cost(app.total_input_tokens, app.total_output_tokens);
         summary_lines.push(Line::from(vec![
             Span::styled("  Tokens: ", Style::default().fg(theme::MUTED)),
             Span::styled(
@@ -178,14 +177,6 @@ pub fn render_stats_full(f: &mut Frame, app: &App, area: Rect) {
                     .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" (~", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                format!("${:.2}", cost),
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(")", Style::default().fg(theme::MUTED)),
         ]));
     }
 
