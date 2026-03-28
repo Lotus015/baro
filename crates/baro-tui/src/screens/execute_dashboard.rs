@@ -11,6 +11,7 @@ use ratatui::{
 
 use crate::app::{App, StoryStatus};
 use crate::theme;
+use crate::utils::format_token_display;
 
 pub fn render_dashboard(f: &mut Frame, app: &App, area: Rect) {
     let main_chunks = Layout::default()
@@ -26,6 +27,11 @@ pub fn render_dashboard(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(4), Constraint::Length(2)])
+        .split(area);
+
     let mut items: Vec<ListItem> = Vec::new();
 
     if app.dag_levels.is_empty() {
@@ -73,7 +79,18 @@ fn render_story_list(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
             )),
     );
-    f.render_widget(list, area);
+    f.render_widget(list, chunks[0]);
+
+    // Stats area: wall time + token counter
+    let elapsed = app.total_time_secs;
+    let wall_time = format!(" ⏱ {}:{:02}", elapsed / 60, elapsed % 60);
+    let token_line = format!(" {}", format_token_display(app.total_input_tokens, app.total_output_tokens));
+
+    let stats = Paragraph::new(vec![
+        Line::from(Span::styled(wall_time, Style::default().fg(theme::MUTED))),
+        Line::from(Span::styled(token_line, Style::default().fg(theme::MUTED))),
+    ]);
+    f.render_widget(stats, chunks[1]);
 }
 
 fn story_list_item(
