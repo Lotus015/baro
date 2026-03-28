@@ -2,7 +2,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 
@@ -155,6 +155,19 @@ pub fn render_dag_full(f: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ));
 
-    let p = Paragraph::new(lines).block(block);
+    let total_lines = lines.len();
+    let p = Paragraph::new(lines)
+        .block(block)
+        .scroll((app.dag_scroll_offset, 0));
     f.render_widget(p, area);
+
+    // Scrollbar
+    let inner_height = area.height.saturating_sub(2) as usize; // subtract block borders
+    if total_lines > inner_height {
+        let mut scrollbar_state = ScrollbarState::new(total_lines.saturating_sub(inner_height))
+            .position(app.dag_scroll_offset as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(theme::ACCENT_DIM));
+        f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
 }

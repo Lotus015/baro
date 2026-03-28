@@ -12,13 +12,6 @@ use crate::theme;
 pub fn render_completion(f: &mut Frame, app: &App) {
     let area = f.area();
     let box_width = 50u16.min(area.width.saturating_sub(4));
-    let pr_extra: u16 = if app.pr_url.is_some() { 1 } else { 0 };
-    let box_height = (17u16 + pr_extra).min(area.height.saturating_sub(2));
-    let x = (area.width.saturating_sub(box_width)) / 2;
-    let y = (area.height.saturating_sub(box_height)) / 2;
-    let popup_area = Rect::new(x, y, box_width, box_height);
-
-    f.render_widget(Clear, popup_area);
 
     let stats = app.final_stats.as_ref();
     let completed = stats.map(|s| s.stories_completed).unwrap_or(app.completed);
@@ -77,6 +70,16 @@ pub fn render_completion(f: &mut Frame, app: &App) {
     } else {
         1.0
     };
+
+    // Box height: 16 base lines (14 content + 2 borders) + optional Time saved + optional PR URL
+    let time_saved_extra: u16 = if saved_secs > 0 { 1 } else { 0 };
+    let pr_extra: u16 = if app.pr_url.is_some() { 1 } else { 0 };
+    let box_height = (16u16 + time_saved_extra + pr_extra).min(area.height.saturating_sub(2));
+    let x = (area.width.saturating_sub(box_width)) / 2;
+    let y = (area.height.saturating_sub(box_height)) / 2;
+    let popup_area = Rect::new(x, y, box_width, box_height);
+
+    f.render_widget(Clear, popup_area);
 
     let mut lines = vec![
         Line::from(""),
@@ -215,7 +218,7 @@ pub fn render_completion(f: &mut Frame, app: &App) {
 
     if let Some(ref url) = app.pr_url {
         lines.push(Line::from(vec![
-            Span::styled("  PR: ", Style::default().fg(theme::MUTED)),
+            Span::styled("  PR:             ", Style::default().fg(theme::MUTED)),
             Span::styled(url.clone(), Style::default().fg(theme::ACCENT)),
         ]));
     }

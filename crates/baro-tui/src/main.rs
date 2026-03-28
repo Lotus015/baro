@@ -380,10 +380,20 @@ async fn run_app(
                         _ => {}
                     }
                 }
-                let is_story_start = matches!(ev, BaroEvent::StoryStart { .. });
+                let story_start_id = if let BaroEvent::StoryStart { ref id, .. } = ev {
+                    Some(id.clone())
+                } else {
+                    None
+                };
                 app.handle_event(ev);
-                if is_story_start {
+                if story_start_id.is_some() {
                     app.auto_scroll_to_running();
+                }
+                if let Some(ref sid) = story_start_id {
+                    if app.global_tab == app::GlobalTab::Dag {
+                        let visible = terminal.size().map(|s| s.height.saturating_sub(10)).unwrap_or(20);
+                        app.dag_auto_scroll_to_story(sid, visible);
+                    }
                 }
             }
             Some(AppEvent::ContextReady(content)) => {
@@ -614,12 +624,18 @@ async fn run_app(
                         KeyCode::Up | KeyCode::Char('k') => {
                             if app.global_tab == app::GlobalTab::Dashboard {
                                 app.story_list_scroll_up();
+                            } else if app.global_tab == app::GlobalTab::Dag {
+                                app.dag_scroll_up();
                             }
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
                             if app.global_tab == app::GlobalTab::Dashboard {
                                 let count = app.story_list_item_count();
                                 app.story_list_scroll_down(count);
+                            } else if app.global_tab == app::GlobalTab::Dag {
+                                let total = app.dag_line_count();
+                                let visible = terminal.size().map(|s| s.height.saturating_sub(10)).unwrap_or(20);
+                                app.dag_scroll_down(total, visible);
                             }
                         }
                         _ => {}
