@@ -1,4 +1,5 @@
 mod app;
+mod context;
 mod dag;
 mod events;
 mod executor;
@@ -519,7 +520,13 @@ fn spawn_context_builder(cwd: &Path, tx: mpsc::Sender<AppEvent>) {
                 }
             }
         } else {
-            String::new()
+            match context::build_context(&cwd).await {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = tx.send(AppEvent::ContextError(format!("Failed to build context: {}", e))).await;
+                    return;
+                }
+            }
         };
         let _ = tx.send(AppEvent::ContextReady(content)).await;
     });
