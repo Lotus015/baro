@@ -201,25 +201,13 @@ pub fn render_completion(f: &mut Frame, app: &App) {
         ),
     ]));
 
-    let format_commas = |n: u64| -> String {
-        let s = n.to_string();
-        let mut result = String::new();
-        for (i, c) in s.chars().rev().enumerate() {
-            if i > 0 && i % 3 == 0 {
-                result.push(',');
-            }
-            result.push(c);
-        }
-        result.chars().rev().collect()
-    };
-
     lines.push(Line::from(vec![
         Span::styled("  Tokens:         ", Style::default().fg(theme::MUTED)),
         Span::styled(
             format!(
                 "{} in / {} out",
-                format_commas(app.total_input_tokens),
-                format_commas(app.total_output_tokens)
+                crate::utils::format_commas(app.total_input_tokens),
+                crate::utils::format_commas(app.total_output_tokens)
             ),
             Style::default().fg(theme::ACCENT),
         ),

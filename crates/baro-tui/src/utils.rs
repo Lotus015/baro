@@ -1,0 +1,22 @@
+/// Format a number with comma separators (e.g. 1234567 -> "1,234,567").
+pub fn format_commas(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
+/// Produce a combined token display string:
+/// "Tokens: 12,345 in / 23,456 out"
+pub fn format_token_display(input_tokens: u64, output_tokens: u64) -> String {
+    format!(
+        "Tokens: {} in / {} out",
+        format_commas(input_tokens),
+        format_commas(output_tokens),
+    )
+}
