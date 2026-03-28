@@ -1173,6 +1173,7 @@ async fn collect_execution_stats(
 async fn create_pull_request(
     cwd: &Path,
     tx: &mpsc::Sender<BaroEvent>,
+    git_mutex: &Arc<Mutex<()>>,
     pr_data: &PrData,
 ) -> Option<String> {
     // Check if gh CLI is available
@@ -1187,6 +1188,19 @@ async fn create_pull_request(
 
     // Get current branch
     let branch = crate::git::get_current_branch(cwd).await.ok()?;
+
+    // Push branch to origin before creating PR
+    match crate::git::git_push_with_retry(git_mutex, cwd, "finalize", tx).await {
+        Ok(()) => {}
+        Err(e) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[git] push failed before PR creation: {}", e),
+                })
+                .await;
+        }
+    }
 
     // Re-read prd.json from disk for up-to-date completion status
     let prd_data = tokio::fs::read_to_string(cwd.join("prd.json"))
@@ -1493,7 +1507,7 @@ pub async fn run_executor(
         total_time_secs,
         stats,
     };
-    let pr_url = create_pull_request(&cwd, &tx, &pr_data).await;
+    let pr_url = create_pull_request(&cwd, &tx, &git_mutex, &pr_data).await;
 
     let _ = tx.send(BaroEvent::FinalizeComplete { pr_url }).await;
 }
