@@ -4,7 +4,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Tabs, Wrap,
+        ScrollbarState, Tabs,
     },
     Frame,
 };
@@ -191,9 +191,7 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
                         .add_modifier(Modifier::BOLD),
                 ));
 
-            let p = Paragraph::new(visible_logs)
-                .block(block)
-                .wrap(Wrap { trim: false });
+            let p = Paragraph::new(visible_logs).block(block);
             f.render_widget(p, area);
 
             if total_logs > inner_height {
@@ -292,9 +290,7 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ));
 
-        let p = Paragraph::new(visible_logs)
-            .block(block)
-            .wrap(Wrap { trim: false });
+        let p = Paragraph::new(visible_logs).block(block);
         f.render_widget(p, log_chunks[1]);
 
         // Log scrollbar
