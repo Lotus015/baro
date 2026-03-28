@@ -1189,16 +1189,92 @@ async fn create_pull_request(
     // Get current branch
     let branch = crate::git::get_current_branch(cwd).await.ok()?;
 
-    // Push branch to origin before creating PR
-    match crate::git::git_push_with_retry(git_mutex, cwd, "finalize", tx).await {
-        Ok(()) => {}
-        Err(e) => {
+    // Check if remote branch exists
+    let ls_remote = Command::new("git")
+        .args(["ls-remote", "--heads", "origin", &branch])
+        .current_dir(cwd)
+        .output()
+        .await
+        .ok()?;
+    let remote_branch_exists = ls_remote.status.success()
+        && !String::from_utf8_lossy(&ls_remote.stdout).trim().is_empty();
+
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: "finalize".to_string(),
+            line: format!(
+                "[git] remote branch '{}' {}",
+                branch,
+                if remote_branch_exists { "exists" } else { "does not exist" }
+            ),
+        })
+        .await;
+
+    if remote_branch_exists {
+        // Remote branch exists, use normal push with retry
+        match crate::git::git_push_with_retry(git_mutex, cwd, "finalize", tx).await {
+            Ok(()) => {}
+            Err(e) => {
+                let _ = tx
+                    .send(BaroEvent::StoryLog {
+                        id: "finalize".to_string(),
+                        line: format!("[git] push failed before PR creation: {}", e),
+                    })
+                    .await;
+            }
+        }
+    } else {
+        // Remote branch does not exist, push with -u to set upstream tracking
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: "finalize".to_string(),
+                line: format!("[git] pushing with -u flag to set upstream for '{}'", branch),
+            })
+            .await;
+
+        let push_output = Command::new("git")
+            .args(["push", "-u", "origin", &branch])
+            .current_dir(cwd)
+            .output()
+            .await
+            .ok()?;
+
+        if push_output.status.success() {
             let _ = tx
                 .send(BaroEvent::StoryLog {
                     id: "finalize".to_string(),
-                    line: format!("[git] push failed before PR creation: {}", e),
+                    line: "[git] push -u ok".to_string(),
                 })
                 .await;
+        } else {
+            let stderr = String::from_utf8_lossy(&push_output.stderr);
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[git] push -u failed: {}", stderr),
+                })
+                .await;
+        }
+    }
+
+    // Check if a PR already exists for this branch
+    let pr_view = Command::new("gh")
+        .args(["pr", "view", &branch, "--json", "url", "--jq", ".url"])
+        .current_dir(cwd)
+        .output()
+        .await
+        .ok()?;
+
+    if pr_view.status.success() {
+        let existing_url = String::from_utf8_lossy(&pr_view.stdout).trim().to_string();
+        if !existing_url.is_empty() {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[pr] PR already exists: {}", existing_url),
+                })
+                .await;
+            return Some(existing_url);
         }
     }
 
