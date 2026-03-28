@@ -3,6 +3,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use tokio::fs;
+use tokio::process::Command;
 
 /// Build a CLAUDE.md context string by scanning the project at `cwd`.
 pub async fn build_context(cwd: &Path) -> Result<String, Box<dyn Error + Send + Sync>> {
@@ -100,7 +101,54 @@ pub async fn build_context(cwd: &Path) -> Result<String, Box<dyn Error + Send + 
         }
     }
 
-    Ok(md)
+    // Enhance the raw scan output with haiku model for a better-structured CLAUDE.md
+    if let Some(enhanced) = enhance_with_haiku(&md).await {
+        Ok(enhanced)
+    } else {
+        Ok(md)
+    }
+}
+
+/// Use the haiku model to refine the raw project scan into a concise, well-structured CLAUDE.md.
+/// Falls back to the raw scan if haiku is unavailable or returns an empty result.
+async fn enhance_with_haiku(raw_context: &str) -> Option<String> {
+    let prompt = format!(
+        "You are a technical documentation assistant. Below is raw project scan data. \
+         Rewrite it as a clean, concise CLAUDE.md file that helps an AI coding assistant \
+         understand this project. Keep it under 500 words. Use markdown headers. \
+         Include: project overview, tech stack, key files, build commands, and conventions.\n\n\
+         Raw scan data:\n{}\n\nReturn ONLY the CLAUDE.md content, no preamble or code fences.",
+        raw_context
+    );
+
+    let output = Command::new("claude")
+        .args([
+            "--dangerously-skip-permissions",
+            "--model",
+            "haiku",
+            "--output-format",
+            "json",
+            "-p",
+            &prompt,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).ok()?;
+    let result = json.get("result").and_then(|r| r.as_str())?;
+    let trimmed = result.trim().to_string();
+    if trimmed.is_empty() || trimmed == "No response." {
+        return None;
+    }
+    Some(trimmed)
 }
 
 struct TechStackEntry {

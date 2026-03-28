@@ -605,6 +605,97 @@ async fn detect_project_and_build(cwd: &Path) -> Option<String> {
     None
 }
 
+// ─── Final build verification with haiku ────────────────────
+
+async fn verify_build_with_haiku(
+    build_output: &str,
+    tx: &mpsc::Sender<BaroEvent>,
+    override_model: &Option<String>,
+    model_routing: bool,
+) {
+    let verification_model = resolve_model(override_model, &None, model_routing, "review");
+    let model_label = verification_model.as_deref().unwrap_or("default");
+
+    let _ = tx
+        .send(BaroEvent::StoryLog {
+            id: "finalize".to_string(),
+            line: format!("[model] final build verification using {}", model_label),
+        })
+        .await;
+
+    let prompt = format!(
+        "Analyze this build output and determine if the build succeeded or failed.\n\
+         Respond with ONLY valid JSON (no markdown fences):\n\
+         {{\"passed\": boolean, \"summary\": \"one-line summary of build result\"}}\n\n\
+         Build output:\n{}",
+        if build_output.len() > 5000 {
+            &build_output[..5000]
+        } else {
+            build_output
+        }
+    );
+
+    let mut args = vec![
+        "--dangerously-skip-permissions".to_string(),
+        "--output-format".to_string(),
+        "json".to_string(),
+        "-p".to_string(),
+        prompt,
+    ];
+    if let Some(ref m) = verification_model {
+        args.push("--model".to_string());
+        args.push(m.clone());
+    }
+
+    let output = match Command::new("claude")
+        .args(&args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await
+    {
+        Ok(o) => o,
+        Err(e) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[build-verify] failed to spawn: {}", e),
+                })
+                .await;
+            return;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json_str = extract_json(&stdout);
+
+    #[derive(serde::Deserialize)]
+    struct BuildVerificationResult {
+        passed: bool,
+        summary: String,
+    }
+
+    match serde_json::from_str::<BuildVerificationResult>(&json_str) {
+        Ok(result) => {
+            let status = if result.passed { "PASSED" } else { "FAILED" };
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: format!("[build-verify] {} — {}", status, result.summary),
+                })
+                .await;
+        }
+        Err(_) => {
+            let _ = tx
+                .send(BaroEvent::StoryLog {
+                    id: "finalize".to_string(),
+                    line: "[build-verify] could not parse verification result".to_string(),
+                })
+                .await;
+        }
+    }
+}
+
 // ─── Review agent ───────────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize)]
@@ -1267,16 +1358,9 @@ pub async fn run_executor(
     // ─── Finalize phase ─────────────────────────────────────────
     let _ = tx.send(BaroEvent::FinalizeStart).await;
 
-    // Step 1: Run build detection
+    // Step 1: Run build detection and verify with haiku model
     if let Some(output) = detect_project_and_build(&cwd).await {
-        if output.to_lowercase().contains("error") {
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: "finalize".to_string(),
-                    line: format!("Build warning: {}", output),
-                })
-                .await;
-        }
+        verify_build_with_haiku(&output, &tx, &override_model, model_routing).await;
     }
 
     // Step 2: Try to create a GitHub PR
