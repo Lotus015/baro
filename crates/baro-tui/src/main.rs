@@ -213,43 +213,6 @@ struct PrdStoryOutput {
     model: Option<String>,
 }
 
-/// Bounce the dock icon and set a badge label on macOS using native AppKit APIs.
-#[cfg(target_os = "macos")]
-fn notify_macos_dock() {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSApplication, NSRequestUserAttentionType};
-    use objc2_foundation::NSString;
-
-    // We must be on the main thread to interact with NSApplication.
-    // In a TUI context the main thread is available but not running an NSRunLoop,
-    // so we use an unchecked marker.
-    let mtm = unsafe { MainThreadMarker::new_unchecked() };
-    let app = NSApplication::sharedApplication(mtm);
-    app.requestUserAttention(NSRequestUserAttentionType::CriticalRequest);
-    let dock_tile = app.dockTile();
-    let label = NSString::from_str("!");
-    dock_tile.setBadgeLabel(Some(&label));
-}
-
-/// No-op on non-macOS platforms.
-#[cfg(not(target_os = "macos"))]
-fn notify_macos_dock() {}
-
-/// Clear the dock badge label on macOS.
-#[cfg(target_os = "macos")]
-fn clear_macos_dock_badge() {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSApplication;
-
-    let mtm = unsafe { MainThreadMarker::new_unchecked() };
-    let app = NSApplication::sharedApplication(mtm);
-    let dock_tile = app.dockTile();
-    dock_tile.setBadgeLabel(None);
-}
-
-/// No-op on non-macOS platforms.
-#[cfg(not(target_os = "macos"))]
-fn clear_macos_dock_badge() {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -396,26 +359,7 @@ async fn run_app(
             Some(AppEvent::Baro(ev)) => {
                 // Fire notification immediately when stories complete
                 if matches!(ev, BaroEvent::NotificationReady) {
-                    // Terminal bell works from inside alternate screen
-                    print!("\x07");
-                    let _ = io::stdout().flush();
-                    // OS notification via spawned process (works from alternate screen)
-                    match std::env::consts::OS {
-                        "macos" => {
-                            notify_macos_dock();
-                        }
-                        "linux" => {
-                            let _ = std::process::Command::new("notify-send")
-                                .args(["baro", "All stories complete"])
-                                .spawn();
-                        }
-                        "windows" => {
-                            let _ = std::process::Command::new("powershell")
-                                .args(["-Command", "[console]::beep(1000,500)"])
-                                .spawn();
-                        }
-                        _ => {}
-                    }
+                    notification::notify_completion();
                 }
                 let story_start_id = if let BaroEvent::StoryStart { ref id, .. } = ev {
                     Some(id.clone())
@@ -473,8 +417,7 @@ async fn run_app(
 
                 // Clear dock badge when user returns to the terminal after a notification
                 if app.notification_ready {
-                    #[cfg(target_os = "macos")]
-                    clear_macos_dock_badge();
+                    notification::clear_badge();
                 }
 
                 match app.screen {
