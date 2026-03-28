@@ -8,6 +8,7 @@ const MAX_LOG_LINES: usize = 200;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Screen {
     Welcome,
+    Context,
     Planning,
     Review,
     Execute,
@@ -151,6 +152,9 @@ pub struct App {
     pub model_routing: bool,
     pub override_model: Option<String>,
 
+    // Context building
+    pub skip_context: bool,
+
     // Notification flag
     pub notification_ready: bool,
 
@@ -207,6 +211,7 @@ impl App {
             notification_ready: false,
             model_routing: true,
             override_model: None,
+            skip_context: false,
             token_usage: HashMap::new(),
             total_input_tokens: 0,
             total_output_tokens: 0,

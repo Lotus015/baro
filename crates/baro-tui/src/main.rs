@@ -59,6 +59,10 @@ struct Cli {
     /// Disable model routing (equivalent to --model opus)
     #[arg(long = "no-model-routing")]
     no_model_routing: bool,
+
+    /// Skip the context building phase entirely
+    #[arg(long)]
+    skip_context: bool,
 }
 
 enum AppEvent {
@@ -197,6 +201,8 @@ async fn run_app(
         app.override_model = Some("opus".to_string());
         app.model_routing = false;
     }
+
+    app.skip_context = cli.skip_context;
 
     let (tx, mut rx) = mpsc::channel::<AppEvent>(256);
 
