@@ -11,7 +11,7 @@ use tokio::time::timeout;
 use crate::app::ReviewStory;
 use crate::dag::build_dag;
 use crate::events::BaroEvent;
-use crate::utils::format_commas;
+use crate::utils::{extract_json, format_commas};
 
 // ─── PRD types (for reading/writing prd.json) ───────────────
 
@@ -474,29 +474,6 @@ async fn run_claude_for_story(
     }
 }
 
-// ─── JSON extraction helper ─────────────────────────────────
-
-fn extract_json(text: &str) -> String {
-    if let Some(start) = text.find("```json") {
-        let after = &text[start + 7..];
-        if let Some(end) = after.find("```") {
-            return after[..end].trim().to_string();
-        }
-    }
-    if let Some(start) = text.find("```") {
-        let after = &text[start + 3..];
-        if let Some(end) = after.find("```") {
-            return after[..end].trim().to_string();
-        }
-    }
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
-            return text[start..=end].to_string();
-        }
-    }
-    text.trim().to_string()
-}
-
 // ─── Build detection & execution ────────────────────────────
 
 async fn detect_project_and_build(cwd: &Path) -> Option<String> {
@@ -618,8 +595,8 @@ async fn verify_build_with_haiku(
          Respond with ONLY valid JSON (no markdown fences):\n\
          {{\"passed\": boolean, \"summary\": \"one-line summary of build result\"}}\n\n\
          Build output:\n{}",
-        if build_output.len() > 5000 {
-            &build_output[..5000]
+        if build_output.len() > crate::constants::BUILD_OUTPUT_TRUNCATION {
+            &build_output[..crate::constants::BUILD_OUTPUT_TRUNCATION]
         } else {
             build_output
         }
@@ -734,7 +711,7 @@ async fn run_review_for_level(
         })
         .await;
 
-    let max_cycles = 2;
+    let max_cycles = crate::constants::MAX_REVIEW_CYCLES;
 
     for cycle in 0..max_cycles {
         cycles_run += 1;
@@ -806,8 +783,8 @@ async fn run_review_for_level(
         // Run build to capture output for reviewer context
         let build_section = match detect_project_and_build(cwd).await {
             Some(output) => {
-                let truncated = if output.len() > 5000 {
-                    &output[..5000]
+                let truncated = if output.len() > crate::constants::BUILD_OUTPUT_TRUNCATION {
+                    &output[..crate::constants::BUILD_OUTPUT_TRUNCATION]
                 } else {
                     &output
                 };
@@ -1329,6 +1306,10 @@ pub async fn run_executor(
     .await;
 
     let total_time_secs = start.elapsed().as_secs();
+
+    // Signal that notifications should fire while execution is still completing
+    let _ = tx.send(BaroEvent::NotificationReady).await;
+
     let _ = tx
         .send(BaroEvent::Done {
             total_time_secs,
@@ -1341,9 +1322,6 @@ pub async fn run_executor(
             },
         })
         .await;
-
-    // Signal that notifications should fire after TUI cleanup
-    let _ = tx.send(BaroEvent::NotificationReady).await;
 
     // ─── Finalize phase ─────────────────────────────────────────
     let _ = tx.send(BaroEvent::FinalizeStart).await;
