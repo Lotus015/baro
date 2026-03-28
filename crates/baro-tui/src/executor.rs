@@ -1077,6 +1077,394 @@ async fn run_review_for_level(
     (cycles_run, total_fixes_applied)
 }
 
+// ─── Accumulated stats from DAG execution ──────────────────
+
+struct ExecutionStats {
+    completed: u32,
+    skipped: u32,
+    files_created: u32,
+    files_modified: u32,
+    commits: u32,
+    review_cycles: u32,
+    review_fixes_applied: u32,
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+// ─── PR creation data passed to create_pull_request ────────
+
+struct PrData {
+    project: String,
+    total_time_secs: u64,
+    stats: ExecutionStats,
+}
+
+// ─── Execute DAG levels ────────────────────────────────────
+
+async fn execute_dag_levels(
+    levels: &[crate::dag::DagLevel],
+    stories: &[PrdStory],
+    cwd: &Path,
+    prd_path: &Path,
+    tx: &mpsc::Sender<BaroEvent>,
+    git_mutex: &Arc<Mutex<()>>,
+    semaphore: &Option<Arc<Semaphore>>,
+    timeout_secs: u64,
+    model_routing: bool,
+    override_model: &Option<String>,
+    context_content: Option<&str>,
+) -> ExecutionStats {
+    let story_map: HashMap<&str, &PrdStory> =
+        stories.iter().map(|s| (s.id.as_str(), s)).collect();
+
+    let total: u32 = stories.iter().filter(|s| !s.passes).count() as u32;
+
+    let mut stats = ExecutionStats {
+        completed: 0,
+        skipped: 0,
+        files_created: 0,
+        files_modified: 0,
+        commits: 0,
+        review_cycles: 0,
+        review_fixes_applied: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+    };
+
+    for (level_index, level) in levels.iter().enumerate() {
+        // Save current commit hash before executing stories in this level
+        let saved_hash = {
+            let _git_lock = git_mutex.lock().await;
+            let output = Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(cwd)
+                .output()
+                .await;
+            match output {
+                Ok(o) if o.status.success() => {
+                    String::from_utf8_lossy(&o.stdout).trim().to_string()
+                }
+                _ => String::new(),
+            }
+        };
+
+        // All stories in a level run in parallel
+        let mut handles = Vec::new();
+
+        for story_id in &level.story_ids {
+            let Some(story) = story_map.get(story_id.as_str()) else {
+                continue;
+            };
+            let story = (*story).clone();
+            let cwd = cwd.to_path_buf();
+            let prd_path = prd_path.to_path_buf();
+            let tx = tx.clone();
+            let git_mutex = Arc::clone(git_mutex);
+
+            let semaphore = semaphore.clone();
+            let story_model =
+                resolve_model(override_model, &story.model, model_routing, "execute");
+            let ctx = context_content.map(str::to_string);
+            let handle = tokio::spawn(async move {
+                let _permit = if let Some(ref sem) = semaphore {
+                    Some(sem.acquire().await.expect("semaphore closed"))
+                } else {
+                    None
+                };
+                execute_story(
+                    &story,
+                    &cwd,
+                    &prd_path,
+                    &tx,
+                    &git_mutex,
+                    StoryExecConfig { timeout_secs, model: story_model, context: ctx.as_deref() },
+                )
+                .await
+            });
+            handles.push((story_id.clone(), handle));
+        }
+
+        let mut level_completed_ids: Vec<String> = Vec::new();
+
+        for (story_id, handle) in handles {
+            match handle.await {
+                Ok(Ok((duration_secs, files_created, files_modified, story_input, story_output))) => {
+                    stats.completed += 1;
+                    stats.files_created += files_created;
+                    stats.files_modified += files_modified;
+                    stats.commits += 1;
+                    stats.input_tokens += story_input;
+                    stats.output_tokens += story_output;
+                    level_completed_ids.push(story_id.clone());
+
+                    let _ = tx
+                        .send(BaroEvent::StoryComplete {
+                            id: story_id,
+                            duration_secs,
+                            files_created,
+                            files_modified,
+                        })
+                        .await;
+
+                    let percentage = if total > 0 {
+                        (stats.completed as f64 / total as f64 * 100.0) as u32
+                    } else {
+                        0
+                    };
+                    let _ = tx
+                        .send(BaroEvent::Progress {
+                            completed: stats.completed,
+                            total,
+                            percentage,
+                        })
+                        .await;
+                }
+                Ok(Err(_)) => {
+                    stats.skipped += 1;
+                }
+                Err(e) => {
+                    stats.skipped += 1;
+                    let _ = tx
+                        .send(BaroEvent::StoryLog {
+                            id: story_id,
+                            line: format!("Task panicked: {}", e),
+                        })
+                        .await;
+                }
+            }
+        }
+
+        // Run review for this level if we have a saved hash and completed stories
+        if !saved_hash.is_empty() && !level_completed_ids.is_empty() {
+            let completed_stories: Vec<&PrdStory> = level_completed_ids
+                .iter()
+                .filter_map(|id| story_map.get(id.as_str()).copied())
+                .collect();
+
+            let (cycles, fixes) = run_review_for_level(
+                &saved_hash,
+                cwd,
+                &completed_stories,
+                tx,
+                git_mutex,
+                prd_path,
+                level_index,
+                timeout_secs,
+                model_routing,
+                override_model,
+                context_content,
+            )
+            .await;
+            stats.review_cycles += cycles;
+            stats.review_fixes_applied += fixes;
+        }
+    }
+
+    stats
+}
+
+// ─── Collect stats and emit Done event ─────────────────────
+
+async fn collect_execution_stats(
+    tx: &mpsc::Sender<BaroEvent>,
+    total_time_secs: u64,
+    stats: &ExecutionStats,
+) {
+    let _ = tx.send(BaroEvent::NotificationReady).await;
+
+    let _ = tx
+        .send(BaroEvent::Done {
+            total_time_secs,
+            stats: crate::events::DoneStats {
+                stories_completed: stats.completed,
+                stories_skipped: stats.skipped,
+                total_commits: stats.commits,
+                files_created: stats.files_created,
+                files_modified: stats.files_modified,
+            },
+        })
+        .await;
+}
+
+// ─── Create GitHub pull request ────────────────────────────
+
+async fn create_pull_request(
+    cwd: &Path,
+    tx: &mpsc::Sender<BaroEvent>,
+    pr_data: &PrData,
+) -> Option<String> {
+    // Check if gh CLI is available
+    let gh_check = Command::new("gh")
+        .arg("--version")
+        .output()
+        .await
+        .ok()?;
+    if !gh_check.status.success() {
+        return None;
+    }
+
+    // Get current branch
+    let branch = crate::git::get_current_branch(cwd).await.ok()?;
+
+    // Re-read prd.json from disk for up-to-date completion status
+    let prd_data = tokio::fs::read_to_string(cwd.join("prd.json"))
+        .await
+        .ok()?;
+    let current_prd: PrdFile = serde_json::from_str(&prd_data).ok()?;
+
+    // Calculate per-level parallelism gain using DAG (use all stories, not just incomplete)
+    let dag_levels = crate::dag::build_dag_all(&current_prd.user_stories).unwrap_or_default();
+    let (level_saved, sequential_time) = {
+        let mut tseq = 0u64;
+        let mut tpar = 0u64;
+        for level in &dag_levels {
+            let mut lsum = 0u64;
+            let mut lmax = 0u64;
+            for sid in &level.story_ids {
+                if let Some(s) = current_prd.user_stories.iter().find(|s| s.id == *sid) {
+                    if let Some(d) = s.duration_secs {
+                        lsum += d;
+                        lmax = lmax.max(d);
+                    }
+                }
+            }
+            tseq += lsum;
+            tpar += lmax;
+        }
+        (tseq.saturating_sub(tpar), tseq)
+    };
+
+    // Build PR body
+    let summary = current_prd
+        .description
+        .split('.')
+        .next()
+        .unwrap_or(&current_prd.description)
+        .trim();
+    let summary = if summary.is_empty() {
+        &current_prd.description
+    } else {
+        summary
+    };
+
+    let mut body = format!("{}\n\n", summary);
+
+    // Stories table
+    body.push_str("## Stories\n\n");
+    body.push_str("| ID | Title | Duration | Status |\n");
+    body.push_str("|:---|:------|:---------|:-------|\n");
+    for story in &current_prd.user_stories {
+        let duration_str = match story.duration_secs {
+            Some(d) if d >= 60 => format!("{}m {}s", d / 60, d % 60),
+            Some(d) => format!("{}s", d),
+            None => "–".to_string(),
+        };
+        let status = if story.passes { "Done" } else { "Skipped" };
+        body.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            story.id, story.title, duration_str, status
+        ));
+    }
+
+    // Stats section
+    let total_time_secs = pr_data.total_time_secs;
+    let wall_time_str = if total_time_secs >= 60 {
+        format!("{}m {}s", total_time_secs / 60, total_time_secs % 60)
+    } else {
+        format!("{}s", total_time_secs)
+    };
+    let parallelism_stats = if level_saved > 0 {
+        let time_saved_str = if level_saved >= 60 {
+            format!("{}m {}s", level_saved / 60, level_saved % 60)
+        } else {
+            format!("{}s", level_saved)
+        };
+        let parallel_time = sequential_time.saturating_sub(level_saved);
+        let speedup = if parallel_time > 0 {
+            sequential_time as f64 / parallel_time as f64
+        } else {
+            1.0
+        };
+        format!(
+            "- **Time saved:** {} (parallelism)\n\
+             - **Speedup:** {:.1}x\n",
+            time_saved_str, speedup
+        )
+    } else {
+        String::new()
+    };
+    body.push_str(&format!(
+        "\n## Stats\n\n\
+         - **Wall time:** {}\n\
+         {}\
+         - **Files created:** {}\n\
+         - **Files modified:** {}\n\
+         - **Tokens:** {} input / {} output\n\
+         - **Stories:** {}/{} completed, {} skipped\n",
+        wall_time_str,
+        parallelism_stats,
+        pr_data.stats.files_created,
+        pr_data.stats.files_modified,
+        format_commas(pr_data.stats.input_tokens),
+        format_commas(pr_data.stats.output_tokens),
+        pr_data.stats.completed,
+        current_prd.user_stories.len(),
+        pr_data.stats.skipped
+    ));
+
+    // Review section
+    body.push_str(&format!(
+        "\n## Review\n\n\
+         - **Review cycles:** {}\n\
+         - **Fixes auto-applied:** {}\n",
+        pr_data.stats.review_cycles, pr_data.stats.review_fixes_applied
+    ));
+
+    // Footer
+    body.push_str(
+        "\n---\n\nBuilt with [baro](https://www.npmjs.com/package/baro-ai) \
+         — Background Agent Runtime Orchestrator\n",
+    );
+
+    let pr_output = Command::new("gh")
+        .args([
+            "pr",
+            "create",
+            "--title",
+            &pr_data.project,
+            "--body",
+            &body,
+            "--base",
+            "main",
+            "--head",
+            &branch,
+        ])
+        .current_dir(cwd)
+        .output()
+        .await
+        .ok()?;
+
+    if pr_output.status.success() {
+        let stdout = String::from_utf8_lossy(&pr_output.stdout)
+            .trim()
+            .to_string();
+        if stdout.is_empty() {
+            None
+        } else {
+            Some(stdout)
+        }
+    } else {
+        let stderr = String::from_utf8_lossy(&pr_output.stderr);
+        let _ = tx
+            .send(BaroEvent::StoryLog {
+                id: "finalize".to_string(),
+                line: format!("PR creation failed: {}", stderr),
+            })
+            .await;
+        None
+    }
+}
+
 // ─── Main executor entry point ──────────────────────────────
 
 pub async fn run_executor(
@@ -1089,7 +1477,6 @@ pub async fn run_executor(
     let prd_path = cwd.join("prd.json");
     let stories = &prd.user_stories;
     let incomplete: Vec<&PrdStory> = stories.iter().filter(|s| !s.passes).collect();
-    let total = incomplete.len() as u32;
 
     // Emit init
     let _ = tx
@@ -1142,17 +1529,6 @@ pub async fn run_executor(
 
     let git_mutex = Arc::new(Mutex::new(()));
 
-    let start = Instant::now();
-    let mut completed = 0u32;
-    let mut skipped = 0u32;
-    let mut total_files_created = 0u32;
-    let mut total_files_modified = 0u32;
-    let mut total_commits = 0u32;
-    let mut review_cycles = 0u32;
-    let mut review_fixes_applied = 0u32;
-    let mut total_input_tokens = 0u64;
-    let mut total_output_tokens = 0u64;
-
     // Create semaphore for parallelism limiting (0 = unlimited)
     let semaphore = if parallel > 0 {
         Some(Arc::new(Semaphore::new(parallel as usize)))
@@ -1160,138 +1536,23 @@ pub async fn run_executor(
         None
     };
 
+    let start = Instant::now();
+
     // Execute level by level
-    let story_map: HashMap<&str, &PrdStory> =
-        stories.iter().map(|s| (s.id.as_str(), s)).collect();
-
-    for (level_index, level) in levels.iter().enumerate() {
-        // Save current commit hash before executing stories in this level
-        let saved_hash = {
-            let _git_lock = git_mutex.lock().await;
-            let output = Command::new("git")
-                .args(["rev-parse", "HEAD"])
-                .current_dir(&cwd)
-                .output()
-                .await;
-            match output {
-                Ok(o) if o.status.success() => {
-                    String::from_utf8_lossy(&o.stdout).trim().to_string()
-                }
-                _ => String::new(),
-            }
-        };
-
-        // All stories in a level run in parallel
-        let mut handles = Vec::new();
-
-        for story_id in &level.story_ids {
-            let Some(story) = story_map.get(story_id.as_str()) else {
-                continue;
-            };
-            let story = (*story).clone();
-            let cwd = cwd.clone();
-            let prd_path = prd_path.clone();
-            let tx = tx.clone();
-            let git_mutex = Arc::clone(&git_mutex);
-
-            let semaphore = semaphore.clone();
-            let story_model =
-                resolve_model(&override_model, &story.model, model_routing, "execute");
-            let ctx = context_content.clone();
-            let handle = tokio::spawn(async move {
-                let _permit = if let Some(ref sem) = semaphore {
-                    Some(sem.acquire().await.expect("semaphore closed"))
-                } else {
-                    None
-                };
-                execute_story(
-                    &story,
-                    &cwd,
-                    &prd_path,
-                    &tx,
-                    &git_mutex,
-                    StoryExecConfig { timeout_secs, model: story_model, context: ctx.as_deref() },
-                )
-                .await
-            });
-            handles.push((story_id.clone(), handle));
-        }
-
-        let mut level_completed_ids: Vec<String> = Vec::new();
-
-        for (story_id, handle) in handles {
-            match handle.await {
-                Ok(Ok((duration_secs, files_created, files_modified, story_input, story_output))) => {
-                    completed += 1;
-                    total_files_created += files_created;
-                    total_files_modified += files_modified;
-                    total_commits += 1;
-                    total_input_tokens += story_input;
-                    total_output_tokens += story_output;
-                    level_completed_ids.push(story_id.clone());
-
-                    let _ = tx
-                        .send(BaroEvent::StoryComplete {
-                            id: story_id,
-                            duration_secs,
-                            files_created,
-                            files_modified,
-                        })
-                        .await;
-
-                    let percentage = if total > 0 {
-                        (completed as f64 / total as f64 * 100.0) as u32
-                    } else {
-                        0
-                    };
-                    let _ = tx
-                        .send(BaroEvent::Progress {
-                            completed,
-                            total,
-                            percentage,
-                        })
-                        .await;
-                }
-                Ok(Err(_)) => {
-                    skipped += 1;
-                }
-                Err(e) => {
-                    skipped += 1;
-                    let _ = tx
-                        .send(BaroEvent::StoryLog {
-                            id: story_id,
-                            line: format!("Task panicked: {}", e),
-                        })
-                        .await;
-                }
-            }
-        }
-
-        // Run review for this level if we have a saved hash and completed stories
-        if !saved_hash.is_empty() && !level_completed_ids.is_empty() {
-            let completed_stories: Vec<&PrdStory> = level_completed_ids
-                .iter()
-                .filter_map(|id| story_map.get(id.as_str()).copied())
-                .collect();
-
-            let (cycles, fixes) = run_review_for_level(
-                &saved_hash,
-                &cwd,
-                &completed_stories,
-                &tx,
-                &git_mutex,
-                &prd_path,
-                level_index,
-                timeout_secs,
-                model_routing,
-                &override_model,
-                context_content.as_deref(),
-            )
-            .await;
-            review_cycles += cycles;
-            review_fixes_applied += fixes;
-        }
-    }
+    let stats = execute_dag_levels(
+        &levels,
+        stories,
+        &cwd,
+        &prd_path,
+        &tx,
+        &git_mutex,
+        &semaphore,
+        timeout_secs,
+        model_routing,
+        &override_model,
+        context_content.as_deref(),
+    )
+    .await;
 
     // Final push of prd.json completion status
     let _prd_push = async {
@@ -1331,21 +1592,8 @@ pub async fn run_executor(
 
     let total_time_secs = start.elapsed().as_secs();
 
-    // Signal that notifications should fire while execution is still completing
-    let _ = tx.send(BaroEvent::NotificationReady).await;
-
-    let _ = tx
-        .send(BaroEvent::Done {
-            total_time_secs,
-            stats: crate::events::DoneStats {
-                stories_completed: completed,
-                stories_skipped: skipped,
-                total_commits,
-                files_created: total_files_created,
-                files_modified: total_files_modified,
-            },
-        })
-        .await;
+    // Signal notifications and emit Done event with stats
+    collect_execution_stats(&tx, total_time_secs, &stats).await;
 
     // ─── Finalize phase ─────────────────────────────────────────
     let _ = tx.send(BaroEvent::FinalizeStart).await;
@@ -1356,178 +1604,12 @@ pub async fn run_executor(
     }
 
     // Step 2: Try to create a GitHub PR
-    let pr_url = async {
-        // Check if gh CLI is available
-        let gh_check = Command::new("gh")
-            .arg("--version")
-            .output()
-            .await
-            .ok()?;
-        if !gh_check.status.success() {
-            return None;
-        }
-
-        // Get current branch
-        let branch = crate::git::get_current_branch(&cwd).await.ok()?;
-
-        // Re-read prd.json from disk for up-to-date completion status
-        let prd_data = tokio::fs::read_to_string(cwd.join("prd.json"))
-            .await
-            .ok()?;
-        let current_prd: PrdFile = serde_json::from_str(&prd_data).ok()?;
-
-        // Calculate per-level parallelism gain using DAG (use all stories, not just incomplete)
-        let dag_levels = crate::dag::build_dag_all(&current_prd.user_stories).unwrap_or_default();
-        let (level_saved, sequential_time) = {
-            let mut tseq = 0u64;
-            let mut tpar = 0u64;
-            for level in &dag_levels {
-                let mut lsum = 0u64;
-                let mut lmax = 0u64;
-                for sid in &level.story_ids {
-                    if let Some(s) = current_prd.user_stories.iter().find(|s| s.id == *sid) {
-                        if let Some(d) = s.duration_secs {
-                            lsum += d;
-                            lmax = lmax.max(d);
-                        }
-                    }
-                }
-                tseq += lsum;
-                tpar += lmax;
-            }
-            (tseq.saturating_sub(tpar), tseq)
-        };
-
-        // Build PR body
-        let summary = current_prd
-            .description
-            .split('.')
-            .next()
-            .unwrap_or(&current_prd.description)
-            .trim();
-        let summary = if summary.is_empty() {
-            &current_prd.description
-        } else {
-            summary
-        };
-
-        let mut body = format!("{}\n\n", summary);
-
-        // Stories table
-        body.push_str("## Stories\n\n");
-        body.push_str("| ID | Title | Duration | Status |\n");
-        body.push_str("|:---|:------|:---------|:-------|\n");
-        for story in &current_prd.user_stories {
-            let duration_str = match story.duration_secs {
-                Some(d) if d >= 60 => format!("{}m {}s", d / 60, d % 60),
-                Some(d) => format!("{}s", d),
-                None => "–".to_string(),
-            };
-            let status = if story.passes { "Done" } else { "Skipped" };
-            body.push_str(&format!(
-                "| {} | {} | {} | {} |\n",
-                story.id, story.title, duration_str, status
-            ));
-        }
-
-        // Stats section
-        let wall_time_str = if total_time_secs >= 60 {
-            format!("{}m {}s", total_time_secs / 60, total_time_secs % 60)
-        } else {
-            format!("{}s", total_time_secs)
-        };
-        let parallelism_stats = if level_saved > 0 {
-            let time_saved_str = if level_saved >= 60 {
-                format!("{}m {}s", level_saved / 60, level_saved % 60)
-            } else {
-                format!("{}s", level_saved)
-            };
-            let parallel_time = sequential_time.saturating_sub(level_saved);
-            let speedup = if parallel_time > 0 {
-                sequential_time as f64 / parallel_time as f64
-            } else {
-                1.0
-            };
-            format!(
-                "- **Time saved:** {} (parallelism)\n\
-                 - **Speedup:** {:.1}x\n",
-                time_saved_str, speedup
-            )
-        } else {
-            String::new()
-        };
-        body.push_str(&format!(
-            "\n## Stats\n\n\
-             - **Wall time:** {}\n\
-             {}\
-             - **Files created:** {}\n\
-             - **Files modified:** {}\n\
-             - **Tokens:** {} input / {} output\n\
-             - **Stories:** {}/{} completed, {} skipped\n",
-            wall_time_str,
-            parallelism_stats,
-            total_files_created,
-            total_files_modified,
-            format_commas(total_input_tokens),
-            format_commas(total_output_tokens),
-            completed,
-            current_prd.user_stories.len(),
-            skipped
-        ));
-
-        // Review section
-        body.push_str(&format!(
-            "\n## Review\n\n\
-             - **Review cycles:** {}\n\
-             - **Fixes auto-applied:** {}\n",
-            review_cycles, review_fixes_applied
-        ));
-
-        // Footer
-        body.push_str(
-            "\n---\n\nBuilt with [baro](https://www.npmjs.com/package/baro-ai) \
-             — Background Agent Runtime Orchestrator\n",
-        );
-
-        let pr_output = Command::new("gh")
-            .args([
-                "pr",
-                "create",
-                "--title",
-                &current_prd.project,
-                "--body",
-                &body,
-                "--base",
-                "main",
-                "--head",
-                &branch,
-            ])
-            .current_dir(&cwd)
-            .output()
-            .await
-            .ok()?;
-
-        if pr_output.status.success() {
-            let stdout = String::from_utf8_lossy(&pr_output.stdout)
-                .trim()
-                .to_string();
-            if stdout.is_empty() {
-                None
-            } else {
-                Some(stdout)
-            }
-        } else {
-            let stderr = String::from_utf8_lossy(&pr_output.stderr);
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: "finalize".to_string(),
-                    line: format!("PR creation failed: {}", stderr),
-                })
-                .await;
-            None
-        }
-    }
-    .await;
+    let pr_data = PrData {
+        project: prd.project.clone(),
+        total_time_secs,
+        stats,
+    };
+    let pr_url = create_pull_request(&cwd, &tx, &pr_data).await;
 
     let _ = tx.send(BaroEvent::FinalizeComplete { pr_url }).await;
 }
