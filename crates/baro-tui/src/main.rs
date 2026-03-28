@@ -6,6 +6,7 @@ mod dag;
 mod events;
 mod executor;
 mod git;
+mod notification;
 mod screens;
 mod theme;
 mod ui;
@@ -234,6 +235,22 @@ fn notify_macos_dock() {
 #[cfg(not(target_os = "macos"))]
 fn notify_macos_dock() {}
 
+/// Clear the dock badge label on macOS.
+#[cfg(target_os = "macos")]
+fn clear_macos_dock_badge() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+
+    let mtm = unsafe { MainThreadMarker::new_unchecked() };
+    let app = NSApplication::sharedApplication(mtm);
+    let dock_tile = app.dockTile();
+    dock_tile.setBadgeLabel(None);
+}
+
+/// No-op on non-macOS platforms.
+#[cfg(not(target_os = "macos"))]
+fn clear_macos_dock_badge() {}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -452,6 +469,12 @@ async fn run_app(
                 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
                 if key.kind != KeyEventKind::Press {
                     continue;
+                }
+
+                // Clear dock badge when user returns to the terminal after a notification
+                if app.notification_ready {
+                    #[cfg(target_os = "macos")]
+                    clear_macos_dock_badge();
                 }
 
                 match app.screen {
