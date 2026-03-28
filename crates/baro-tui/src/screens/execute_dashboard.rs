@@ -80,11 +80,6 @@ fn render_story_list(f: &mut Frame, app: &mut App, area: Rect) {
                     " Stories ",
                     Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
                 )),
-        )
-        .highlight_style(
-            Style::default()
-                .bg(theme::BORDER)
-                .add_modifier(Modifier::BOLD),
         );
     f.render_stateful_widget(list, chunks[0], &mut app.story_list_state);
 
