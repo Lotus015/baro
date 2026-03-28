@@ -53,6 +53,22 @@ fn default_retries() -> u32 {
     2
 }
 
+/// Configuration passed to [`run_executor`] and friends.
+pub struct ExecutorConfig {
+    pub parallel: u32,
+    pub timeout_secs: u64,
+    pub model_routing: bool,
+    pub override_model: Option<String>,
+    pub context_content: Option<String>,
+}
+
+/// Per-story execution parameters (avoids too-many-arguments).
+struct StoryExecConfig<'a> {
+    timeout_secs: u64,
+    model: Option<String>,
+    context: Option<&'a str>,
+}
+
 // ─── Story prompt builder ───────────────────────────────────
 
 fn build_prompt(story: &PrdStory, cwd: &Path, context: Option<&str>) -> String {
@@ -253,10 +269,9 @@ async fn execute_story(
     prd_path: &Path,
     tx: &mpsc::Sender<BaroEvent>,
     git_mutex: &Mutex<()>,
-    timeout_secs: u64,
-    model: Option<String>,
-    context: Option<&str>,
+    cfg: StoryExecConfig<'_>,
 ) -> Result<(u64, u32, u32, u64, u64), String> {
+    let StoryExecConfig { timeout_secs, model, context } = cfg;
     let max_attempts = story.retries + 1;
 
     for attempt in 1..=max_attempts {
@@ -919,7 +934,7 @@ async fn run_review_for_level(
             };
 
             let fix_model = resolve_model(override_model, &None, model_routing, "execute");
-            match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, timeout_secs, fix_model, context)
+            match execute_story(&fix_story, cwd, prd_path, tx, git_mutex, StoryExecConfig { timeout_secs, model: fix_model, context })
                 .await
             {
                 Ok((duration_secs, files_created, files_modified, _, _)) => {
@@ -986,12 +1001,9 @@ pub async fn run_executor(
     prd: PrdFile,
     cwd: PathBuf,
     tx: mpsc::Sender<BaroEvent>,
-    parallel: u32,
-    timeout_secs: u64,
-    model_routing: bool,
-    override_model: Option<String>,
-    context_content: Option<String>,
+    config: ExecutorConfig,
 ) {
+    let ExecutorConfig { parallel, timeout_secs, model_routing, override_model, context_content } = config;
     let prd_path = cwd.join("prd.json");
     let stories = &prd.user_stories;
     let incomplete: Vec<&PrdStory> = stories.iter().filter(|s| !s.passes).collect();
@@ -1116,9 +1128,7 @@ pub async fn run_executor(
                     &prd_path,
                     &tx,
                     &git_mutex,
-                    timeout_secs,
-                    story_model,
-                    ctx.as_deref(),
+                    StoryExecConfig { timeout_secs, model: story_model, context: ctx.as_deref() },
                 )
                 .await
             });
@@ -1291,10 +1301,7 @@ pub async fn run_executor(
         let current_prd: PrdFile = serde_json::from_str(&prd_data).ok()?;
 
         // Calculate per-level parallelism gain using DAG
-        let dag_levels = match crate::dag::build_dag(&current_prd.user_stories) {
-            Ok(levels) => levels,
-            Err(_) => Vec::new(),
-        };
+        let dag_levels = crate::dag::build_dag(&current_prd.user_stories).unwrap_or_default();
         let (level_saved, sequential_time) = {
             let mut tseq = 0u64;
             let mut tpar = 0u64;

@@ -314,7 +314,7 @@ fn extract_toml_value(content: &str, key: &str) -> Option<String> {
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with(&format!("{} ", key)) || trimmed.starts_with(&format!("{}=", key)) {
-            if let Some(val) = trimmed.splitn(2, '=').nth(1) {
+            if let Some(val) = trimmed.split_once('=').map(|x| x.1) {
                 let val = val.trim().trim_matches('"');
                 if !val.is_empty() {
                     return Some(val.to_string());
@@ -552,7 +552,7 @@ async fn detect_conventions(cwd: &Path) -> Conventions {
         ),
     ]);
 
-    for (_prefix, variants) in &prefix_configs {
+    for variants in prefix_configs.values() {
         for name in *variants {
             if fs::metadata(cwd.join(name)).await.is_ok() {
                 linter_configs.push(name.to_string());
