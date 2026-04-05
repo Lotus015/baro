@@ -90,6 +90,9 @@ jobs:
           npm install
           npx tsup src/core/openai-planner.ts --format esm
 
+      - name: Sync README from root to npm package
+        run: cp README.md packages/baro-app/README.md
+
       - name: Clean native binaries before publish
         working-directory: packages/baro-app
         run: rm -f bin/baro-native bin/baro-native.exe

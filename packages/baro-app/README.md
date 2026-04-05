@@ -40,7 +40,10 @@ baro --model opus "Complex architecture redesign"
 # Disable model routing (use opus everywhere)
 baro --no-model-routing "Build entire app"
 
-# Resume interrupted execution
+# Dry run - generate plan without executing
+baro --dry-run "Add REST API"
+
+# Resume interrupted execution (or execute a dry-run plan)
 baro --resume
 
 # Specify working directory
@@ -66,13 +69,42 @@ baro --cwd ~/projects/myapp "Add REST API"
 - **Build detection** — auto-detects project type (Cargo, npm, Go, Python, Make) and runs builds during review
 - **Git coordination** — mutex-protected commits, auto-push with retry, pull --rebase, conflict detection
 - **Branch per run** — creates `baro/<name>` branch, keeps main clean
+- **Dry run** — `--dry-run` generates plan and saves to `prd.json` without executing, then `--resume` to run it
 - **Resume** — detects `prd.json` and resumes incomplete executions
 - **PR creation** — creates GitHub PR with stories table, stats, time saved, and review summary
 - **Configurable parallelism** — `--parallel N` to limit concurrent story execution
 - **Story timeout** — `--timeout SECONDS` kills stuck agents (default: 10 minutes)
 - **Time saved** — shows parallel speedup vs sequential execution
-- **System notifications** — terminal bell + OS notification (macOS/Linux) when done
+- **System notifications** — terminal bell + OS notification (macOS/Linux/Windows) when done
 - **Retry logic** — failed stories retry automatically (configurable per story)
+- **Interactive settings** — configure model, parallelism, timeout, context, and planner on the welcome screen with Tab/arrow keys
+- **Project config** — `.barorc` file in project root sets defaults (no CLI flags needed)
+- **Session lock** — prevents multiple baro instances from running in the same directory
+
+## Config file
+
+Create a `.barorc` in your project root to set defaults:
+
+```json
+{
+  "model": "routed",
+  "parallel": 3,
+  "timeout": 600,
+  "skipContext": false,
+  "planner": "claude"
+}
+```
+
+All fields are optional. CLI flags override `.barorc`, and interactive changes on the welcome screen override both.
+
+| Field | Values | Default |
+|-------|--------|---------|
+| `model` | `"routed"`, `"opus"`, `"sonnet"`, `"haiku"` | `"routed"` |
+| `parallel` | `0` (unlimited) or any number | `0` |
+| `timeout` | seconds per story | `600` |
+| `skipContext` | `true` / `false` | `false` |
+| `planner` | `"claude"`, `"openai"` | `"claude"` |
+| `dryRun` | `true` / `false` | `false` |
 
 ## Options
 
@@ -88,7 +120,9 @@ Options:
   --no-model-routing           Use opus for everything (disables routing)
   --parallel <N>               Max concurrent stories, 0 = unlimited (default: 0)
   --timeout <seconds>          Story timeout in seconds (default: 600)
-  --resume                     Resume from existing prd.json
+  --dry-run                    Generate plan only, save to prd.json, do not execute
+  --resume                     Resume from existing prd.json (also runs dry-run plans)
+  --skip-context               Skip CLAUDE.md auto-generation
   --cwd <path>                 Working directory (default: current)
   -h, --help                   Print help
 ```
@@ -96,9 +130,11 @@ Options:
 ## Requirements
 
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) installed and authenticated
-- macOS (arm64/x64) or Linux (x64/arm64)
+- macOS (arm64/x64), Linux (x64/arm64), or Windows (x64)
 - Node.js 18+ (only if using `--planner openai`)
 - `gh` CLI (optional, for automatic PR creation)
+
+> **Windows note:** Windows 10+ is required. For best TUI experience, use [Windows Terminal](https://aka.ms/terminal) or another modern terminal emulator.
 
 ## Architecture
 
