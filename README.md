@@ -40,7 +40,10 @@ baro --model opus "Complex architecture redesign"
 # Disable model routing (use opus everywhere)
 baro --no-model-routing "Build entire app"
 
-# Resume interrupted execution
+# Dry run - generate plan without executing
+baro --dry-run "Add REST API"
+
+# Resume interrupted execution (or execute a dry-run plan)
 baro --resume
 
 # Specify working directory
@@ -66,6 +69,7 @@ baro --cwd ~/projects/myapp "Add REST API"
 - **Build detection** — auto-detects project type (Cargo, npm, Go, Python, Make) and runs builds during review
 - **Git coordination** — mutex-protected commits, auto-push with retry, pull --rebase, conflict detection
 - **Branch per run** — creates `baro/<name>` branch, keeps main clean
+- **Dry run** — `--dry-run` generates plan and saves to `prd.json` without executing, then `--resume` to run it
 - **Resume** — detects `prd.json` and resumes incomplete executions
 - **PR creation** — creates GitHub PR with stories table, stats, time saved, and review summary
 - **Configurable parallelism** — `--parallel N` to limit concurrent story execution
@@ -100,6 +104,7 @@ All fields are optional. CLI flags override `.barorc`, and interactive changes o
 | `timeout` | seconds per story | `600` |
 | `skipContext` | `true` / `false` | `false` |
 | `planner` | `"claude"`, `"openai"` | `"claude"` |
+| `dryRun` | `true` / `false` | `false` |
 
 ## Options
 
@@ -115,7 +120,8 @@ Options:
   --no-model-routing           Use opus for everything (disables routing)
   --parallel <N>               Max concurrent stories, 0 = unlimited (default: 0)
   --timeout <seconds>          Story timeout in seconds (default: 600)
-  --resume                     Resume from existing prd.json
+  --dry-run                    Generate plan only, save to prd.json, do not execute
+  --resume                     Resume from existing prd.json (also runs dry-run plans)
   --skip-context               Skip CLAUDE.md auto-generation
   --cwd <path>                 Working directory (default: current)
   -h, --help                   Print help

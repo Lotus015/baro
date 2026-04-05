@@ -194,6 +194,9 @@ pub struct App {
     // Context building
     pub skip_context: bool,
 
+    // Dry run mode
+    pub dry_run: bool,
+
     // Notification flag
     pub notification_ready: bool,
 
@@ -258,6 +261,7 @@ impl App {
             model_routing: true,
             override_model: None,
             skip_context: false,
+            dry_run: false,
             token_usage: HashMap::new(),
             total_input_tokens: 0,
             total_output_tokens: 0,

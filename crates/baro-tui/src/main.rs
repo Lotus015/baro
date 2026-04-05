@@ -123,6 +123,10 @@ struct Cli {
     /// Skip the context building phase entirely
     #[arg(long)]
     skip_context: bool,
+
+    /// Generate plan only, do not execute stories
+    #[arg(long)]
+    dry_run: bool,
 }
 
 enum AppEvent {
@@ -239,6 +243,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(writer);
     let mut terminal = Terminal::new(backend)?;
 
+    let is_dry_run = cli.dry_run;
     let result = run_app(&mut terminal, cli).await;
 
     disable_raw_mode()?;
@@ -252,6 +257,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Error: {}", err);
         std::process::exit(1);
     }
+
+    // Print dry-run message after TUI exits
+    if is_dry_run {
+        let prd_path = cwd.join("prd.json");
+        if prd_path.exists() {
+            println!("\x1b[32m\u{2713}\x1b[0m Dry run complete \u{2014} plan saved to prd.json");
+            println!("  Run \x1b[1mbaro --resume\x1b[0m to execute the saved plan.");
+        }
+    }
+
     Ok(())
 }
 
@@ -287,6 +302,8 @@ async fn run_app(
     if cli.parallel != 0 { app.parallel_limit = cli.parallel; }
     if cli.timeout != 600 { app.timeout_secs = cli.timeout; }
     if cli.skip_context { app.skip_context = true; }
+    if rc.dry_run == Some(true) { app.dry_run = true; }
+    if cli.dry_run { app.dry_run = true; }
 
     if cli.planner != "claude" {
         app.planner = match cli.planner.as_str() {
@@ -573,6 +590,20 @@ async fn run_app(
                         }
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                         KeyCode::Enter => {
+                            if app.dry_run {
+                                // Dry run: save prd.json and exit
+                                let prd = executor::prd_from_review(
+                                    &app.project,
+                                    &app.branch_name,
+                                    &app.description,
+                                    &app.review_stories,
+                                );
+                                let _ = executor::write_prd(&prd, &cwd);
+                                app.planning_error = Some(
+                                    "Dry run complete \u{2014} plan saved to prd.json. Run without --dry-run to execute.".to_string()
+                                );
+                                return Ok(());
+                            }
                             if app.is_resume {
                                 // Resume mode: read existing prd.json (has full acceptance/tests data)
                                 let prd_path = cwd.join("prd.json");
