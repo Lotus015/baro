@@ -23,6 +23,39 @@ pub enum Planner {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WelcomeField {
+    Goal,
+    Model,
+    Parallel,
+    Timeout,
+    Context,
+    Planner,
+}
+
+impl WelcomeField {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Goal => Self::Model,
+            Self::Model => Self::Parallel,
+            Self::Parallel => Self::Timeout,
+            Self::Timeout => Self::Context,
+            Self::Context => Self::Planner,
+            Self::Planner => Self::Goal,
+        }
+    }
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Goal => Self::Planner,
+            Self::Model => Self::Goal,
+            Self::Parallel => Self::Model,
+            Self::Timeout => Self::Parallel,
+            Self::Context => Self::Timeout,
+            Self::Planner => Self::Context,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GlobalTab {
     Dashboard,
     Dag,
@@ -102,6 +135,7 @@ pub struct App {
 
     // Welcome screen
     pub goal_input: String,
+    pub welcome_field: WelcomeField,
 
     // Context building screen
     pub claude_md_content: Option<String>,
@@ -185,6 +219,7 @@ impl App {
             planner: Planner::Claude,
 
             goal_input: String::new(),
+            welcome_field: WelcomeField::Goal,
 
             claude_md_content: None,
 
@@ -638,6 +673,15 @@ impl App {
 
             BaroEvent::FinalizeStart => {
                 self.finalize_in_progress = true;
+                self.active_stories.insert(
+                    "finalize".to_string(),
+                    ActiveStory {
+                        id: "finalize".to_string(),
+                        title: "Finalizing".to_string(),
+                        logs: Vec::new(),
+                        start_time: Instant::now(),
+                    },
+                );
             }
 
             BaroEvent::FinalizeComplete { pr_url } => {

@@ -6,11 +6,10 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::App;
+use crate::app::{App, Planner, WelcomeField};
 use crate::theme;
 
 // Giant blocky letters - each is ~12 wide, 9 rows tall
-// Using double-width block chars for maximum chunkiness
 const LETTER_B: [&str; 9] = [
     "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}  ",
     "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} ",
@@ -72,24 +71,40 @@ fn rainbow(idx: usize) -> Color {
     }
 }
 
+fn radio(selected: bool, label: &str, focused: bool) -> Vec<Span<'static>> {
+    let marker = if selected { "\u{25c9}" } else { "\u{25cb}" };
+    let style = if selected && focused {
+        Style::default().fg(theme::ACCENT_BRIGHT).add_modifier(Modifier::BOLD)
+    } else if selected {
+        Style::default().fg(theme::ACCENT)
+    } else {
+        Style::default().fg(theme::MUTED)
+    };
+    vec![
+        Span::styled(format!("{} ", marker), style),
+        Span::styled(label.to_string(), style),
+    ]
+}
+
 pub fn render(f: &mut Frame, app: &App) {
     let area = f.area();
     let w = area.width;
+    let focused = app.welcome_field;
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
-            Constraint::Length(9),   // Logo (9 rows)
-            Constraint::Length(1),   // Spacer
-            Constraint::Length(1),   // Tagline
-            Constraint::Length(2),   // Spacer
-            Constraint::Length(5),   // Goal input (tall like Claude Code)
-            Constraint::Length(1),   // Spacer
-            Constraint::Length(3),   // Planner selector
-            Constraint::Length(2),   // Spacer
-            Constraint::Length(1),   // Help text
-            Constraint::Length(1),   // Version
+            Constraint::Length(9),  // Logo
+            Constraint::Length(1),  // Spacer
+            Constraint::Length(1),  // Tagline
+            Constraint::Length(2),  // Spacer
+            Constraint::Length(5),  // Goal input
+            Constraint::Length(1),  // Spacer
+            Constraint::Length(9),  // Settings box (model + parallel + timeout + context + planner)
+            Constraint::Length(2),  // Spacer
+            Constraint::Length(1),  // Help text
+            Constraint::Length(1),  // Version
             Constraint::Min(1),
         ])
         .split(area);
@@ -118,25 +133,13 @@ pub fn render(f: &mut Frame, app: &App) {
         let o_color = rainbow(phase + 6 + row);
 
         logo_lines.push(Line::from(vec![
-            Span::styled(
-                LETTER_B[row].to_string(),
-                Style::default().fg(b_color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("   ".to_string(), Style::default()),
-            Span::styled(
-                LETTER_A[row].to_string(),
-                Style::default().fg(a_color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("   ".to_string(), Style::default()),
-            Span::styled(
-                LETTER_R[row].to_string(),
-                Style::default().fg(r_color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("   ".to_string(), Style::default()),
-            Span::styled(
-                LETTER_O[row].to_string(),
-                Style::default().fg(o_color).add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(LETTER_B[row], Style::default().fg(b_color).add_modifier(Modifier::BOLD)),
+            Span::raw("   "),
+            Span::styled(LETTER_A[row], Style::default().fg(a_color).add_modifier(Modifier::BOLD)),
+            Span::raw("   "),
+            Span::styled(LETTER_R[row], Style::default().fg(r_color).add_modifier(Modifier::BOLD)),
+            Span::raw("   "),
+            Span::styled(LETTER_O[row], Style::default().fg(o_color).add_modifier(Modifier::BOLD)),
         ]));
     }
 
@@ -146,39 +149,25 @@ pub fn render(f: &mut Frame, app: &App) {
     // ── Tagline ──
     let tagline = Paragraph::new(Line::from(vec![
         Span::styled("autonomous ", Style::default().fg(theme::ACCENT_BRIGHT)),
-        Span::styled(
-            "parallel ",
-            Style::default()
-                .fg(theme::TEXT)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("parallel ", Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
         Span::styled("coding", Style::default().fg(theme::ACCENT_BRIGHT)),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(tagline, chunks[3]);
 
-    // ── Goal input (tall, like Claude Code) ──
+    // ── Goal input ──
     let input_width = (w - 10).min(100);
     let input_area = center(chunks[5], input_width);
 
-    // C64-style blinking block cursor
     let cursor_visible = (app.tick_count / 5).is_multiple_of(2);
-    let cursor_char = if cursor_visible { "\u{2588}" } else { " " };
+    let cursor_char = if cursor_visible && focused == WelcomeField::Goal { "\u{2588}" } else { " " };
 
     let display_text = if app.goal_input.is_empty() {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled(
-                    " What do you want to build?  ".to_string(),
-                    Style::default().fg(theme::MUTED),
-                ),
-                Span::styled(
-                    cursor_char.to_string(),
-                    Style::default()
-                        .fg(theme::SUCCESS)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(" What do you want to build?  ", Style::default().fg(theme::MUTED)),
+                Span::styled(cursor_char, Style::default().fg(theme::SUCCESS).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
         ]
@@ -186,103 +175,111 @@ pub fn render(f: &mut Frame, app: &App) {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled(
-                    format!(" {}", &app.goal_input),
-                    Style::default()
-                        .fg(theme::TEXT)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    cursor_char.to_string(),
-                    Style::default()
-                        .fg(theme::SUCCESS)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(format!(" {}", &app.goal_input), Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
+                Span::styled(cursor_char, Style::default().fg(theme::SUCCESS).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
         ]
     };
 
+    let goal_border = if focused == WelcomeField::Goal { theme::BORDER_ACTIVE } else { theme::BORDER };
     let input = Paragraph::new(display_text).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(if app.goal_input.is_empty() {
-                theme::BORDER
-            } else {
-                theme::BORDER_ACTIVE
-            }))
-            .title(Span::styled(
-                " Goal ",
-                Style::default()
-                    .fg(theme::TEXT)
-                    .add_modifier(Modifier::BOLD),
-            )),
+            .border_style(Style::default().fg(goal_border))
+            .title(Span::styled(" Goal ", Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD))),
     );
     f.render_widget(input, input_area);
 
-    // ── Planner selector ──
-    let planner_area = center(chunks[7], input_width);
-    let is_claude = app.planner == crate::app::Planner::Claude;
+    // ── Settings box ──
+    let settings_area = center(chunks[7], input_width);
 
-    let claude_style = if is_claude {
-        Style::default()
-            .fg(theme::ACCENT_BRIGHT)
-            .add_modifier(Modifier::BOLD)
+    let model_focused = focused == WelcomeField::Model;
+    let is_routed = app.model_routing && app.override_model.is_none();
+    let is_opus = app.override_model.as_deref() == Some("opus");
+    let is_sonnet = app.override_model.as_deref() == Some("sonnet");
+    let is_haiku = app.override_model.as_deref() == Some("haiku");
+
+    let mut model_spans = vec![
+        Span::styled("  Model:    ", Style::default().fg(theme::MUTED)),
+    ];
+    model_spans.extend(radio(is_routed, "routed", model_focused));
+    model_spans.push(Span::raw("  "));
+    model_spans.extend(radio(is_opus, "opus", model_focused));
+    model_spans.push(Span::raw("  "));
+    model_spans.extend(radio(is_sonnet, "sonnet", model_focused));
+    model_spans.push(Span::raw("  "));
+    model_spans.extend(radio(is_haiku, "haiku", model_focused));
+
+    let parallel_focused = focused == WelcomeField::Parallel;
+    let parallel_val = if app.parallel_limit == 0 { "\u{221E}".to_string() } else { app.parallel_limit.to_string() };
+    let par_style = if parallel_focused {
+        Style::default().fg(theme::ACCENT_BRIGHT).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::ACCENT)
     };
-    let openai_style = if !is_claude {
-        Style::default()
-            .fg(theme::ACCENT_BRIGHT)
-            .add_modifier(Modifier::BOLD)
+
+    let timeout_focused = focused == WelcomeField::Timeout;
+    let timeout_style = if timeout_focused {
+        Style::default().fg(theme::ACCENT_BRIGHT).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::ACCENT)
     };
 
-    let claude_marker = if is_claude { "\u{25c9}" } else { "\u{25cb}" };
-    let openai_marker = if !is_claude { "\u{25c9}" } else { "\u{25cb}" };
+    let context_focused = focused == WelcomeField::Context;
+    let ctx_check = if app.skip_context { "\u{2610}" } else { "\u{2611}" };
+    let ctx_style = if context_focused {
+        Style::default().fg(theme::ACCENT_BRIGHT).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::ACCENT)
+    };
 
-    let planner = Paragraph::new(Line::from(vec![
-        Span::styled("  ".to_string(), Style::default()),
-        Span::styled(format!("{} ", claude_marker), claude_style),
-        Span::styled("Claude".to_string(), claude_style),
-        Span::styled("        ".to_string(), Style::default()),
-        Span::styled(format!("{} ", openai_marker), openai_style),
-        Span::styled("OpenAI".to_string(), openai_style),
-        Span::styled("              ".to_string(), Style::default()),
-        Span::styled(
-            "\u{2190}\u{2192} switch".to_string(),
-            Style::default().fg(theme::MUTED),
-        ),
-    ]))
-    .block(
+    let planner_focused = focused == WelcomeField::Planner;
+    let is_claude = app.planner == Planner::Claude;
+
+    let mut planner_spans = vec![
+        Span::styled("  Planner:  ", Style::default().fg(theme::MUTED)),
+    ];
+    planner_spans.extend(radio(is_claude, "claude", planner_focused));
+    planner_spans.push(Span::raw("  "));
+    planner_spans.extend(radio(!is_claude, "openai", planner_focused));
+
+    let settings_lines = vec![
+        Line::from(model_spans),
+        Line::from(vec![
+            Span::styled("  Parallel: ", Style::default().fg(theme::MUTED)),
+            Span::styled(format!("[{}]", parallel_val), par_style),
+            Span::styled("          Timeout: ", Style::default().fg(theme::MUTED)),
+            Span::styled(format!("[{}s]", app.timeout_secs), timeout_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Context:  ", Style::default().fg(theme::MUTED)),
+            Span::styled(format!("{} Auto-generate CLAUDE.md", ctx_check), ctx_style),
+        ]),
+        Line::from(planner_spans),
+    ];
+
+    let settings_border = if focused != WelcomeField::Goal { theme::BORDER_ACTIVE } else { theme::BORDER };
+    let settings = Paragraph::new(settings_lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(settings_border))
             .title(Span::styled(
-                " Planner ",
-                Style::default()
-                    .fg(theme::TEXT)
-                    .add_modifier(Modifier::BOLD),
+                " Settings ",
+                Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
             )),
     );
-    f.render_widget(planner, planner_area);
+    f.render_widget(settings, settings_area);
 
     // ── Keybinds ──
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "Enter",
-            Style::default()
-                .fg(theme::SUCCESS)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Enter", Style::default().fg(theme::SUCCESS).add_modifier(Modifier::BOLD)),
         Span::styled(" start   ", Style::default().fg(theme::TEXT_DIM)),
-        Span::styled(
-            "Esc",
-            Style::default()
-                .fg(theme::ERROR)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Tab", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(" next   ", Style::default().fg(theme::TEXT_DIM)),
+        Span::styled("\u{2190}\u{2192}", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(" change   ", Style::default().fg(theme::TEXT_DIM)),
+        Span::styled("Esc", Style::default().fg(theme::ERROR).add_modifier(Modifier::BOLD)),
         Span::styled(" quit", Style::default().fg(theme::TEXT_DIM)),
     ]))
     .alignment(Alignment::Center);
@@ -290,10 +287,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Version ──
     let version_str = format!("v{}", env!("CARGO_PKG_VERSION"));
-    let version = Paragraph::new(Line::from(Span::styled(
-        version_str,
-        Style::default().fg(theme::MUTED),
-    )))
-    .alignment(Alignment::Center);
+    let version = Paragraph::new(Line::from(Span::styled(version_str, Style::default().fg(theme::MUTED))))
+        .alignment(Alignment::Center);
     f.render_widget(version, chunks[10]);
 }

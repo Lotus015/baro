@@ -1,5 +1,6 @@
 mod app;
 mod claude_runner;
+mod config;
 mod constants;
 mod context;
 mod dag;
@@ -260,13 +261,39 @@ async fn run_app(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     let cwd = std::fs::canonicalize(&cli.cwd)?;
-    app.parallel_limit = cli.parallel;
-    app.timeout_secs = cli.timeout;
 
-    app.planner = match cli.planner.as_str() {
-        "openai" => Planner::OpenAI,
+    // Load .barorc config (defaults if not found)
+    let rc = config::load_config(&cwd);
+
+    // Apply config defaults, then CLI overrides
+    app.parallel_limit = rc.parallel.unwrap_or(0);
+    app.timeout_secs = rc.timeout.unwrap_or(600);
+    app.skip_context = rc.skip_context.unwrap_or(false);
+
+    app.planner = match rc.planner.as_deref() {
+        Some("openai") => Planner::OpenAI,
         _ => Planner::Claude,
     };
+
+    match rc.model.as_deref() {
+        Some("opus") | Some("sonnet") | Some("haiku") => {
+            app.override_model = rc.model.clone();
+            app.model_routing = false;
+        }
+        _ => {} // "routed" or None = keep defaults
+    }
+
+    // CLI args override config
+    if cli.parallel != 0 { app.parallel_limit = cli.parallel; }
+    if cli.timeout != 600 { app.timeout_secs = cli.timeout; }
+    if cli.skip_context { app.skip_context = true; }
+
+    if cli.planner != "claude" {
+        app.planner = match cli.planner.as_str() {
+            "openai" => Planner::OpenAI,
+            _ => Planner::Claude,
+        };
+    }
 
     if let Some(ref model) = cli.model {
         app.override_model = Some(model.clone());
@@ -275,8 +302,6 @@ async fn run_app(
         app.override_model = Some("opus".to_string());
         app.model_routing = false;
     }
-
-    app.skip_context = cli.skip_context;
 
     let (tx, mut rx) = mpsc::channel::<AppEvent>(256);
 
@@ -423,8 +448,13 @@ async fn run_app(
                 match app.screen {
                     Screen::Welcome => match key.code {
                         KeyCode::Esc => return Ok(()),
+                        KeyCode::Tab => { app.welcome_field = app.welcome_field.next(); }
+                        KeyCode::BackTab => { app.welcome_field = app.welcome_field.prev(); }
                         KeyCode::Enter => {
-                            if !app.goal_input.is_empty() {
+                            if app.welcome_field != app::WelcomeField::Goal {
+                                // Enter on non-goal fields = jump to goal
+                                app.welcome_field = app::WelcomeField::Goal;
+                            } else if !app.goal_input.is_empty() {
                                 if app.skip_context {
                                     app.start_planning();
                                     spawn_planner(&app, &cwd, tx.clone());
@@ -443,9 +473,64 @@ async fn run_app(
                                 }
                             }
                         }
-                        KeyCode::Char(c) => app.goal_input.push(c),
-                        KeyCode::Backspace => { app.goal_input.pop(); }
-                        KeyCode::Left | KeyCode::Right => app.toggle_planner(),
+                        KeyCode::Left | KeyCode::Right => {
+                            match app.welcome_field {
+                                app::WelcomeField::Model => {
+                                    // Cycle: routed -> opus -> sonnet -> haiku
+                                    let options: &[Option<&str>] = &[None, Some("opus"), Some("sonnet"), Some("haiku")];
+                                    let current = options.iter().position(|o| {
+                                        match (&app.override_model, o) {
+                                            (None, None) => app.model_routing,
+                                            (Some(m), Some(o)) => m.as_str() == *o,
+                                            _ => false,
+                                        }
+                                    }).unwrap_or(0);
+                                    let next = if key.code == KeyCode::Right {
+                                        (current + 1) % options.len()
+                                    } else {
+                                        (current + options.len() - 1) % options.len()
+                                    };
+                                    if next == 0 {
+                                        app.override_model = None;
+                                        app.model_routing = true;
+                                    } else {
+                                        app.override_model = options[next].map(|s| s.to_string());
+                                        app.model_routing = false;
+                                    }
+                                }
+                                app::WelcomeField::Parallel => {
+                                    if key.code == KeyCode::Right {
+                                        app.parallel_limit = app.parallel_limit.saturating_add(1);
+                                    } else {
+                                        app.parallel_limit = app.parallel_limit.saturating_sub(1);
+                                    }
+                                }
+                                app::WelcomeField::Timeout => {
+                                    if key.code == KeyCode::Right {
+                                        app.timeout_secs = (app.timeout_secs + 60).min(3600);
+                                    } else {
+                                        app.timeout_secs = app.timeout_secs.saturating_sub(60).max(60);
+                                    }
+                                }
+                                app::WelcomeField::Context => {
+                                    app.skip_context = !app.skip_context;
+                                }
+                                app::WelcomeField::Planner => {
+                                    app.toggle_planner();
+                                }
+                                app::WelcomeField::Goal => {} // left/right in text = no-op
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if app.welcome_field == app::WelcomeField::Goal {
+                                app.goal_input.push(c);
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if app.welcome_field == app::WelcomeField::Goal {
+                                app.goal_input.pop();
+                            }
+                        }
                         _ => {}
                     },
                     Screen::Context => match key.code {
