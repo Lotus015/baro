@@ -73,6 +73,33 @@ baro --cwd ~/projects/myapp "Add REST API"
 - **Time saved** — shows parallel speedup vs sequential execution
 - **System notifications** — terminal bell + OS notification (macOS/Linux/Windows) when done
 - **Retry logic** — failed stories retry automatically (configurable per story)
+- **Interactive settings** — configure model, parallelism, timeout, context, and planner on the welcome screen with Tab/arrow keys
+- **Project config** — `.barorc` file in project root sets defaults (no CLI flags needed)
+- **Session lock** — prevents multiple baro instances from running in the same directory
+
+## Config file
+
+Create a `.barorc` in your project root to set defaults:
+
+```json
+{
+  "model": "routed",
+  "parallel": 3,
+  "timeout": 600,
+  "skipContext": false,
+  "planner": "claude"
+}
+```
+
+All fields are optional. CLI flags override `.barorc`, and interactive changes on the welcome screen override both.
+
+| Field | Values | Default |
+|-------|--------|---------|
+| `model` | `"routed"`, `"opus"`, `"sonnet"`, `"haiku"` | `"routed"` |
+| `parallel` | `0` (unlimited) or any number | `0` |
+| `timeout` | seconds per story | `600` |
+| `skipContext` | `true` / `false` | `false` |
+| `planner` | `"claude"`, `"openai"` | `"claude"` |
 
 ## Options
 
@@ -89,6 +116,7 @@ Options:
   --parallel <N>               Max concurrent stories, 0 = unlimited (default: 0)
   --timeout <seconds>          Story timeout in seconds (default: 600)
   --resume                     Resume from existing prd.json
+  --skip-context               Skip CLAUDE.md auto-generation
   --cwd <path>                 Working directory (default: current)
   -h, --help                   Print help
 ```
