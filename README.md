@@ -124,21 +124,61 @@ Options:
   --resume                     Resume from existing prd.json (also runs dry-run plans)
   --skip-context               Skip CLAUDE.md auto-generation
   --cwd <path>                 Working directory (default: current)
+  --with-critic                Enable live Critic — reviews each agent turn
+                               against acceptance criteria via `claude --model haiku`
+                               and injects corrective feedback (default: off)
+  --critic-model <name>        Model for the Critic (default: haiku)
+  --no-librarian               Disable cross-agent runtime memory (default: on)
+  --no-sentry                  Disable file-touch conflict detector (default: on)
+  --with-surgeon               Enable adaptive DAG: drop / replace failing stories
+                               at level boundaries instead of stalling (default: off)
+  --surgeon-use-llm            Use `claude --model …` for richer Surgeon replans
+                               (default: deterministic skip-only)
+  --surgeon-model <name>       Model for Surgeon when --surgeon-use-llm is on
+                               (default: opus)
   -h, --help                   Print help
 ```
+
+### Phase 2/3/4 observers (Mozaik bus)
+
+baro 0.19+ runs every story through a TypeScript Mozaik orchestrator.
+Stories on the same DAG level run truly in parallel and observers can
+react to one another's bus events:
+
+- **Librarian** (default ON) — when one agent reads a file or runs grep,
+  later agents in the run see the digest in their prompt and skip the
+  redundant exploration. Measurable token savings on multi-story runs.
+- **Sentry** (default ON) — flags overlapping Edit/Write tool calls
+  across concurrent stories.
+- **Critic** (`--with-critic`, default OFF) — Haiku evaluator reviews
+  each agent turn against acceptance criteria; on a fail verdict, an
+  inline corrective message lands as the agent's next turn so it
+  self-corrects before commit.
+- **Surgeon** (`--with-surgeon`, default OFF) — when a story fails its
+  retry budget, a ReplanItem is emitted on the bus and the Conductor
+  recomputes the DAG at the next level boundary. The simplest mode just
+  drops failing stories so dependents unblock; with `--surgeon-use-llm`
+  Opus proposes splits, prerequisite inserts, or dependency rewires.
 
 ## Requirements
 
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) installed and authenticated
 - macOS (arm64/x64), Linux (x64/arm64), or Windows (x64)
-- Node.js 18+ (only if using `--planner openai`)
+- **Node.js 20+** (orchestrator runtime)
 - `gh` CLI (optional, for automatic PR creation)
 
 > **Windows note:** Windows 10+ is required. For best TUI experience, use [Windows Terminal](https://aka.ms/terminal) or another modern terminal emulator.
 
 ## Architecture
 
-Rust binary distributed via npm. TUI built with ratatui, async execution with tokio, one Claude CLI process per story.
+Rust binary distributed via npm. TUI built with ratatui, async execution
+with tokio. Each `baro` invocation spawns the bundled TypeScript
+[Mozaik](https://github.com/jigjoy-ai/mozaik) orchestrator as a
+subprocess; the orchestrator owns story execution and emits typed
+events into a shared `AgenticEnvironment` bus, where Librarian / Sentry
+/ Critic / Surgeon participants observe and react. Each story is one
+`claude` CLI subprocess (auth inherits from your Claude CLI session —
+no API key needed).
 
 ## License
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env tsx
 /**
  * baro-orchestrator CLI — standalone entry for end-user testing.
  *

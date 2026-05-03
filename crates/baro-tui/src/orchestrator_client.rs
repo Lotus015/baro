@@ -212,20 +212,34 @@ enum EntryPoint {
     NodeJs(PathBuf),
 }
 
-/// Find the orchestrator entry. Searches:
-///   1. Bundled production JS at `node_modules/baro-ai/dist/cli.mjs`
-///      under the user's cwd (when installed via `npm install baro-ai`)
-///   2. Dev tsx script in this repo at
-///      `<exe-dir-or-repo>/packages/baro-orchestrator/scripts/cli.ts`
-///      with tsx in `node_modules/.bin`.
+/// Find the orchestrator entry. Searches in this order:
+///   1. Sibling of the running binary — i.e. `<exe-dir>/cli.mjs`. This is
+///      where baro-ai's postinstall copies the bundled orchestrator
+///      (typically `~/.baro/bin/cli.mjs`). Works for global, local, and
+///      npx installs because the launcher also lives there.
+///   2. Local-install bundle — `<cwd>/node_modules/baro-ai/dist/cli.mjs`.
+///      Useful when baro-ai is added as a dependency of the project
+///      being orchestrated, before the postinstall has run.
+///   3. Dev tsx script — `<repo>/packages/baro-orchestrator/scripts/cli.ts`,
+///      discovered by walking up from the binary's location or from cwd.
 fn locate_entry(cwd: &Path) -> Result<EntryPoint, String> {
-    // (1) Production bundle
+    // (1) Co-located bundle next to the binary itself.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let sibling = parent.join("cli.mjs");
+            if sibling.exists() {
+                return Ok(EntryPoint::NodeJs(sibling));
+            }
+        }
+    }
+
+    // (2) Local-install bundle in the project being orchestrated.
     let bundled = cwd.join("node_modules/baro-ai/dist/cli.mjs");
     if bundled.exists() {
         return Ok(EntryPoint::NodeJs(bundled));
     }
 
-    // (2) Dev tsx — find the baro repo root by walking up from this exe.
+    // (3) Dev tsx — find the baro repo root by walking up from this exe.
     let exe = std::env::current_exe()
         .map_err(|e| format!("cannot read current exe: {}", e))?;
     let mut search_root = exe.parent().map(|p| p.to_path_buf());
@@ -252,7 +266,11 @@ fn locate_entry(cwd: &Path) -> Result<EntryPoint, String> {
     });
 
     let dev_repo = dev_repo.ok_or_else(|| {
-        "could not locate baro-orchestrator package (neither bundled nor dev tsx)".to_string()
+        "could not locate baro-orchestrator: no cli.mjs next to the binary, no \
+         node_modules/baro-ai/dist/cli.mjs in the project, and no dev tsx \
+         script found in a parent baro repo. Try `npm install -g baro-ai` \
+         (this triggers postinstall and stages the orchestrator)."
+            .to_string()
     })?;
     let tsx = dev_repo.join("node_modules/.bin/tsx");
     let script = dev_repo.join("packages/baro-orchestrator/scripts/cli.ts");

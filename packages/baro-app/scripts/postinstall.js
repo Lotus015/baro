@@ -92,6 +92,22 @@ async function main() {
         console.warn(`Warning: Could not download baro: ${err.message}`)
         console.warn(`  Build manually: cargo build --release -p baro-tui`)
     }
+
+    // Copy the bundled Mozaik orchestrator CLI alongside the binary so
+    // the Rust client can find it regardless of how baro-ai was
+    // installed (local node_modules, npx, npm install -g …).
+    const orchestratorSrc = path.join(PACKAGE_ROOT, "dist", "cli.mjs")
+    const orchestratorDst = path.join(BARO_HOME, "cli.mjs")
+    try {
+        if (fs.existsSync(orchestratorSrc)) {
+            fs.copyFileSync(orchestratorSrc, orchestratorDst)
+            console.log(`mozaik orchestrator installed to ${orchestratorDst}`)
+        }
+    } catch (err) {
+        console.warn(
+            `Warning: Could not stage orchestrator CLI: ${err.message}`,
+        )
+    }
 }
 
 main()
