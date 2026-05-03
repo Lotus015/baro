@@ -36,6 +36,30 @@ export {
 } from "./participants/cartographer.js"
 
 export {
+    StoryAgent,
+    StoryResultItem,
+    type StorySpec,
+    type StoryOutcome,
+} from "./participants/story-agent.js"
+
+export {
+    Conductor,
+    ConductorStateItem,
+    type ConductorOptions,
+    type ConductorRunSummary,
+} from "./participants/conductor.js"
+
+export {
+    type PrdFile,
+    type PrdStory,
+    loadPrd,
+    savePrd,
+    normalizePrd,
+    markStoryPassed,
+    buildDefaultStoryPrompt,
+} from "./prd.js"
+
+export {
     buildDag,
     type DagNode,
     type DagLevel,
