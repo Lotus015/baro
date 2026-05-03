@@ -1,0 +1,275 @@
+/**
+ * Librarian — cross-agent runtime memory observer.
+ *
+ * Listens to FunctionCallItem (the tool call) and FunctionCallOutputItem
+ * (its result) on the bus, extracts knowledge from "exploration" tools
+ * (Read, Grep, Bash, Glob, LSP), and indexes it by tags so future
+ * stories can pick it up before they re-do the same work.
+ *
+ * Two consumption surfaces:
+ *
+ *   1. `gatherContext(storyId, hints?)` — RPC-style accessor used by
+ *      Conductor's `onBeforeStoryLaunch` hook to augment a story's
+ *      initial prompt. Returns a single text blob suitable for
+ *      prepending. This is the Phase-2 integration point: prompts
+ *      pick up cross-agent findings without any timing dance.
+ *
+ *   2. KnowledgeItem-s on the bus — emitted whenever a new finding is
+ *      indexed, so other observers can react. (Phase-3 multi-turn
+ *      agents will inject these mid-flight.)
+ *
+ * Library-grade: no PRD knowledge, no story specifics.
+ */
+
+import {
+    ContextItem,
+    FunctionCallItem,
+    FunctionCallOutputItem,
+    Participant,
+} from "@mozaik-ai/core"
+
+import { KnowledgeItem } from "../types.js"
+
+/** Tools whose results are worth capturing for cross-agent reuse. */
+const EXPLORATION_TOOLS = new Set([
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "LSP",
+    "WebFetch",
+    "WebSearch",
+])
+
+interface PendingCall {
+    agentId: string
+    tool: string
+    args: Record<string, unknown>
+    tags: string[]
+    summary: string
+}
+
+interface IndexedKnowledge {
+    sourceAgentId: string
+    tool: string
+    tags: string[]
+    summary: string
+    content: string
+}
+
+export interface LibrarianOptions {
+    /**
+     * Cap the body of each indexed entry to this many characters
+     * (truncated with a marker). Default: 4000.
+     */
+    maxContentChars?: number
+    /**
+     * Cap the total injected context per story to this many characters.
+     * Default: 8000.
+     */
+    maxInjectedChars?: number
+}
+
+export class Librarian extends Participant {
+    private readonly opts: Required<LibrarianOptions>
+    private readonly pending = new Map<string, PendingCall>()
+    private readonly knowledge: IndexedKnowledge[] = []
+
+    constructor(opts: LibrarianOptions = {}) {
+        super()
+        this.opts = {
+            maxContentChars: opts.maxContentChars ?? 4000,
+            maxInjectedChars: opts.maxInjectedChars ?? 8000,
+        }
+    }
+
+    /** All indexed knowledge entries, in order discovered. */
+    getKnowledge(): readonly IndexedKnowledge[] {
+        return this.knowledge
+    }
+
+    /**
+     * Build a context blob to prepend to a new story's prompt. Returns
+     * `null` if there's nothing relevant. Hints (e.g. tags from the
+     * story title/description) bias relevance ranking.
+     */
+    gatherContext(storyId: string, hints: readonly string[] = []): string | null {
+        if (this.knowledge.length === 0) return null
+
+        // Skip findings the story itself produced — we only inject
+        // *cross-agent* knowledge.
+        const candidates = this.knowledge.filter(
+            (k) => k.sourceAgentId !== storyId,
+        )
+        if (candidates.length === 0) return null
+
+        // Rank by hint overlap (strict substring match, case-insensitive).
+        const lowerHints = hints.map((h) => h.toLowerCase())
+        const scored = candidates.map((k) => {
+            const haystack = (k.summary + " " + k.tags.join(" ")).toLowerCase()
+            const score = lowerHints.reduce(
+                (acc, h) => acc + (haystack.includes(h) ? 1 : 0),
+                0,
+            )
+            return { k, score }
+        })
+        scored.sort((a, b) => b.score - a.score)
+
+        const lines: string[] = []
+        let total = 0
+        for (const { k } of scored) {
+            const block = formatEntry(k)
+            if (total + block.length > this.opts.maxInjectedChars) {
+                lines.push("[…librarian truncated remaining findings…]")
+                break
+            }
+            lines.push(block)
+            total += block.length
+        }
+
+        if (lines.length === 0) return null
+        return [
+            "[librarian] Findings from prior agents in this run that may save",
+            "you time. Do not re-fetch what's already here unless you suspect",
+            "the file changed.",
+            "",
+            ...lines,
+        ].join("\n")
+    }
+
+    async onContextItem(source: Participant, item: ContextItem): Promise<void> {
+        if (item instanceof FunctionCallItem) {
+            this.recordPending(source, item)
+            return
+        }
+        if (item instanceof FunctionCallOutputItem) {
+            this.completeWithOutput(source, item)
+            return
+        }
+    }
+
+    private recordPending(source: Participant, item: FunctionCallItem): void {
+        if (!EXPLORATION_TOOLS.has(item.name)) return
+        const agentId = (source as unknown as { agentId?: string }).agentId
+        if (typeof agentId !== "string") return
+        let parsedArgs: Record<string, unknown> = {}
+        try {
+            parsedArgs = JSON.parse(item.args) as Record<string, unknown>
+        } catch {
+            // ignore malformed arg JSON; we'll still record summary
+        }
+        const { tags, summary } = describeCall(item.name, parsedArgs)
+        this.pending.set(item.callId, {
+            agentId,
+            tool: item.name,
+            args: parsedArgs,
+            tags,
+            summary,
+        })
+    }
+
+    private completeWithOutput(
+        source: Participant,
+        item: FunctionCallOutputItem,
+    ): void {
+        const json = item.toJSON() as {
+            call_id: string
+            output: Array<{ text: string }>
+        }
+        const pending = this.pending.get(json.call_id)
+        if (!pending) return
+        this.pending.delete(json.call_id)
+
+        const fullOutput = json.output.map((b) => b.text).join("\n")
+        const content =
+            fullOutput.length > this.opts.maxContentChars
+                ? fullOutput.slice(0, this.opts.maxContentChars) +
+                  "\n[…librarian truncated…]"
+                : fullOutput
+
+        const entry: IndexedKnowledge = {
+            sourceAgentId: pending.agentId,
+            tool: pending.tool,
+            tags: pending.tags,
+            summary: pending.summary,
+            content,
+        }
+        this.knowledge.push(entry)
+
+        // Surface as a bus event for any other observers (and Phase-3
+        // mid-flight injectors).
+        for (const env of this.getEnvironments()) {
+            env.deliverContextItem(
+                this,
+                new KnowledgeItem(
+                    entry.sourceAgentId,
+                    entry.tags,
+                    entry.summary,
+                    entry.content,
+                    entry.tool,
+                ),
+            )
+        }
+    }
+}
+
+function describeCall(
+    tool: string,
+    args: Record<string, unknown>,
+): { tags: string[]; summary: string } {
+    const tags: string[] = [tool.toLowerCase()]
+    let summary = `${tool} call`
+
+    if (tool === "Read") {
+        const path = stringArg(args, "file_path") ?? stringArg(args, "path")
+        if (path) {
+            summary = `Read ${path}`
+            tags.push(path)
+            const base = path.split("/").pop()
+            if (base) tags.push(base)
+        }
+    } else if (tool === "Grep") {
+        const pattern = stringArg(args, "pattern")
+        const path = stringArg(args, "path")
+        summary = `Grep '${pattern ?? "?"}'${path ? ` in ${path}` : ""}`
+        if (pattern) tags.push(pattern)
+        if (path) tags.push(path)
+    } else if (tool === "Glob") {
+        const pattern = stringArg(args, "pattern")
+        summary = `Glob '${pattern ?? "?"}'`
+        if (pattern) tags.push(pattern)
+    } else if (tool === "Bash") {
+        const cmd = stringArg(args, "command")
+        summary = `Bash ${truncate(cmd ?? "", 80)}`
+        if (cmd) tags.push(cmd.split(/\s+/)[0] ?? "")
+    } else if (tool === "WebFetch") {
+        const url = stringArg(args, "url")
+        summary = `WebFetch ${url ?? "?"}`
+        if (url) tags.push(url)
+    } else if (tool === "WebSearch") {
+        const q = stringArg(args, "query")
+        summary = `WebSearch '${truncate(q ?? "", 60)}'`
+        if (q) tags.push(q)
+    }
+    return { tags: tags.filter((t) => t.length > 0), summary }
+}
+
+function stringArg(
+    args: Record<string, unknown>,
+    key: string,
+): string | undefined {
+    const v = args[key]
+    return typeof v === "string" ? v : undefined
+}
+
+function truncate(s: string, n: number): string {
+    return s.length > n ? `${s.slice(0, n)}…` : s
+}
+
+function formatEntry(k: IndexedKnowledge): string {
+    return [
+        `--- [${k.sourceAgentId}] ${k.summary} ---`,
+        k.content,
+        "",
+    ].join("\n")
+}

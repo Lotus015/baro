@@ -34,13 +34,16 @@ import {
     ConductorRunSummary,
     ConductorStateItem,
 } from "./participants/conductor.js"
+import { Librarian } from "./participants/librarian.js"
 import { Operator } from "./participants/operator.js"
+import { Sentry } from "./participants/sentry.js"
 import { StoryResultItem, type StoryAgent } from "./participants/story-agent.js"
 import { PrdFile, loadPrd } from "./prd.js"
 import {
     AgentStateItem,
     ClaudeResultItem,
     ClaudeSystemItem,
+    CoordinationItem,
 } from "./types.js"
 import { emit } from "./tui-protocol.js"
 
@@ -64,6 +67,19 @@ export interface OrchestrateConfig {
      * whether `cwd` is a git working tree.
      */
     withGit?: boolean
+    /**
+     * Whether to wire the Librarian (cross-agent runtime memory) into
+     * the run. When on, prompts for stories at later DAG levels are
+     * automatically augmented with relevant findings from earlier
+     * stories. Default: true.
+     */
+    withLibrarian?: boolean
+    /**
+     * Whether to wire the Sentry (file-touch conflict detector). When
+     * on, overlapping Edit/Write tool calls across agents emit
+     * CoordinationItem warnings on the bus. Default: true.
+     */
+    withSentry?: boolean
     /** Hooks for receiving Operator commands externally (Rust TUI). */
     operatorHooks?: {
         onAbort?: (storyId: string) => void
@@ -109,6 +125,16 @@ export async function orchestrate(
     const gitGate = new GitGate()
     let baseSha: string | null = null
 
+    // Phase-2 observers — Librarian (cross-agent memory) and Sentry
+    // (file conflict detection). Both default ON; either can be turned
+    // off via the OrchestrateConfig flags.
+    const useLibrarian = config.withLibrarian ?? true
+    const useSentry = config.withSentry ?? true
+    const librarian = useLibrarian ? new Librarian() : null
+    const sentry = useSentry ? new Sentry() : null
+    if (librarian) librarian.join(env)
+    if (sentry) sentry.join(env)
+
     // Conductor — the work driver.
     const conductor = new Conductor({
         prdPath: config.prdPath,
@@ -127,6 +153,17 @@ export async function orchestrate(
                           (line) => emitTui && emit({ type: "story_log", id: "_git", line }),
                       )
                   }
+              }
+            : undefined,
+        onBeforeStoryLaunch: librarian
+            ? (storyId, story) => {
+                  // Build hints from the story title + a few description
+                  // tokens so Librarian can rank relevance.
+                  const hints: string[] = [
+                      ...tokenizeForHints(story.title),
+                      ...tokenizeForHints(story.description).slice(0, 8),
+                  ]
+                  return librarian.gatherContext(storyId, hints)
               }
             : undefined,
         onStoryPassed: useGit
@@ -264,6 +301,19 @@ class BaroEventForwarder extends Participant {
             this.handleToolResult(source, item)
             return
         }
+
+        if (item instanceof CoordinationItem) {
+            this.handleCoordination(item)
+            return
+        }
+    }
+
+    private handleCoordination(item: CoordinationItem): void {
+        emit({
+            type: "story_log",
+            id: item.recipientId,
+            line: `[sentry/${item.kind}] ${item.reason}`,
+        })
     }
 
     private handleConductorState(item: ConductorStateItem): void {
@@ -375,5 +425,21 @@ class BaroEventForwarder extends Participant {
             line: `[tool_result ${json.call_id}] ${text}`,
         })
     }
+}
+
+/**
+ * Pull a few keyword-shaped tokens out of free text for Librarian
+ * relevance hints. Lowercased, alphanumeric runs ≥ 3 chars.
+ */
+function tokenizeForHints(text: string): string[] {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const match of text.toLowerCase().matchAll(/[a-z0-9_./-]{3,}/g)) {
+        const tok = match[0]
+        if (seen.has(tok)) continue
+        seen.add(tok)
+        out.push(tok)
+    }
+    return out
 }
 

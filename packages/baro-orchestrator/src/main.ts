@@ -97,3 +97,18 @@ export {
     type OperatorCommand,
     type OperatorHooks,
 } from "./participants/operator.js"
+
+export {
+    Librarian,
+    type LibrarianOptions,
+} from "./participants/librarian.js"
+
+export {
+    Sentry,
+    type SentryOptions,
+} from "./participants/sentry.js"
+
+export {
+    KnowledgeItem,
+    CoordinationItem,
+} from "./types.js"

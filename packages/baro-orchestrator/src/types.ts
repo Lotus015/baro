@@ -11,6 +11,75 @@ import { ContextItem } from "@mozaik-ai/core"
 // ─── Bus routing ────────────────────────────────────────────────────
 
 /**
+ * A piece of derived knowledge — typically a digest of a file read,
+ * a grep result, or a bash command output — that one or more
+ * participants want to share across agents. Librarian emits these,
+ * Conductor (or future participants) consume them when launching new
+ * agents to avoid redundant exploration.
+ *
+ * Library-grade: payload + tags only, no agent-specific assumptions.
+ */
+export class KnowledgeItem extends ContextItem {
+    readonly type = "knowledge"
+
+    constructor(
+        /** Source agent that produced the underlying tool call. */
+        public readonly sourceAgentId: string,
+        /** Free-form tags for relevance matching (e.g. file path, pattern). */
+        public readonly tags: readonly string[],
+        /** Short headline (e.g. "package.json read", "grep 'authToken'"). */
+        public readonly summary: string,
+        /** Full content (file body, command output, etc). */
+        public readonly content: string,
+        /** Tool that produced it ("Read" | "Grep" | "Bash" | "Glob" …). */
+        public readonly tool: string,
+    ) {
+        super()
+    }
+
+    toJSON(): unknown {
+        return {
+            type: this.type,
+            sourceAgentId: this.sourceAgentId,
+            tags: this.tags,
+            summary: this.summary,
+            content: this.content,
+            tool: this.tool,
+        }
+    }
+}
+
+/**
+ * Inter-agent coordination directive. Sentry emits these to ask one
+ * agent to wait, abort, or merge before stepping on another agent's
+ * pending work.
+ */
+export class CoordinationItem extends ContextItem {
+    readonly type = "coordination"
+
+    constructor(
+        public readonly fromAgentId: string,
+        public readonly recipientId: string,
+        public readonly kind: "wait" | "merge" | "abort" | "notice",
+        public readonly reason: string,
+        public readonly payload: Readonly<Record<string, unknown>> = {},
+    ) {
+        super()
+    }
+
+    toJSON(): unknown {
+        return {
+            type: this.type,
+            fromAgentId: this.fromAgentId,
+            recipientId: this.recipientId,
+            kind: this.kind,
+            reason: this.reason,
+            payload: this.payload,
+        }
+    }
+}
+
+/**
  * A user-facing text message addressed to a specific agent in the
  * environment. Other agents see it on the bus but ignore it.
  *

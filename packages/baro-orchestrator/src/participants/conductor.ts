@@ -62,6 +62,16 @@ export interface ConductorOptions {
      */
     onRunStart?: (prd: PrdFile) => Promise<void> | void
     /**
+     * Optional callback fired immediately before each story's
+     * StoryAgent is launched. Returns extra context (e.g. cross-agent
+     * findings from Librarian) to prepend to the story's prompt.
+     * Returning `null`/`undefined` leaves the prompt unchanged.
+     */
+    onBeforeStoryLaunch?: (
+        storyId: string,
+        story: PrdStory,
+    ) => Promise<string | null | undefined> | string | null | undefined
+    /**
      * Optional callback fired after the entire run completes
      * (regardless of success).
      */
@@ -309,7 +319,23 @@ export class Conductor extends Participant {
         }
         const model =
             this.opts.overrideModel ?? story.model ?? this.opts.defaultModel
-        const prompt = this.resolvePrompt(story)
+        let prompt = this.resolvePrompt(story)
+
+        if (this.opts.onBeforeStoryLaunch) {
+            try {
+                const extra = await this.opts.onBeforeStoryLaunch(story.id, story)
+                if (typeof extra === "string" && extra.trim().length > 0) {
+                    prompt = `${extra.trim()}\n\n${prompt}`
+                }
+            } catch (e) {
+                this.emit(
+                    new ConductorStateItem(
+                        "running_level",
+                        `onBeforeStoryLaunch hook for ${story.id} failed: ${(e as Error)?.message ?? String(e)}`,
+                    ),
+                )
+            }
+        }
 
         const agent = new StoryAgent({
             id: story.id,
