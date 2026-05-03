@@ -34,6 +34,7 @@ import {
     ConductorRunSummary,
     ConductorStateItem,
 } from "./participants/conductor.js"
+import { Critic } from "./participants/critic.js"
 import { Librarian } from "./participants/librarian.js"
 import { Operator } from "./participants/operator.js"
 import { Sentry } from "./participants/sentry.js"
@@ -44,6 +45,7 @@ import {
     ClaudeResultItem,
     ClaudeSystemItem,
     CoordinationItem,
+    CritiqueItem,
 } from "./types.js"
 import { emit } from "./tui-protocol.js"
 
@@ -80,6 +82,13 @@ export interface OrchestrateConfig {
      * CoordinationItem warnings on the bus. Default: true.
      */
     withSentry?: boolean
+    /**
+     * Whether to wire the Critic (live acceptance-criteria evaluator).
+     * When on, each story agent's output is evaluated against its
+     * acceptance criteria via a Haiku LLM call. Requires ANTHROPIC_API_KEY.
+     * Default: false (opt-in).
+     */
+    withCritic?: boolean
     /** Hooks for receiving Operator commands externally (Rust TUI). */
     operatorHooks?: {
         onAbort?: (storyId: string) => void
@@ -134,6 +143,22 @@ export async function orchestrate(
     const sentry = useSentry ? new Sentry() : null
     if (librarian) librarian.join(env)
     if (sentry) sentry.join(env)
+
+    // Phase-3 observer — Critic (live acceptance-criteria evaluator).
+    // Opt-in (default OFF). Requires ANTHROPIC_API_KEY.
+    if (config.withCritic) {
+        if (!process.env.ANTHROPIC_API_KEY) {
+            process.stderr.write("critic disabled: no ANTHROPIC_API_KEY\n")
+        } else {
+            const prd = loadPrd(config.prdPath)
+            const targets = new Map<string, readonly string[]>(
+                prd.userStories
+                    .filter((s) => s.acceptance && s.acceptance.length > 0)
+                    .map((s) => [s.id, s.acceptance] as [string, readonly string[]]),
+            )
+            new Critic({ targets }).join(env)
+        }
+    }
 
     // Conductor — the work driver.
     const conductor = new Conductor({
@@ -306,6 +331,11 @@ class BaroEventForwarder extends Participant {
             this.handleCoordination(item)
             return
         }
+
+        if (item instanceof CritiqueItem) {
+            this.handleCritique(item)
+            return
+        }
     }
 
     private handleCoordination(item: CoordinationItem): void {
@@ -313,6 +343,14 @@ class BaroEventForwarder extends Participant {
             type: "story_log",
             id: item.recipientId,
             line: `[sentry/${item.kind}] ${item.reason}`,
+        })
+    }
+
+    private handleCritique(item: CritiqueItem): void {
+        emit({
+            type: "story_log",
+            id: item.agentId,
+            line: `[critic/${item.verdict}] ${item.reasoning}`,
         })
     }
 
