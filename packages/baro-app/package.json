@@ -13,21 +13,33 @@
   ],
   "scripts": {
     "build": "tsup src/core/openai-planner.ts --format esm",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "spike": "tsx scripts/spike-claude-participant.ts",
+    "spike:two": "tsx scripts/spike-claude-participant.ts --two-stories",
+    "spike:midflight": "tsx scripts/spike-claude-participant.ts --midflight"
   },
   "dependencies": {
     "zod": "^3.24.0",
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@mozaik-ai/core": "^3.6.5",
     "@types/node": "^22.0.0",
     "tsup": "^8.0.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.3.3"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/Lotus015/baro"
   },
-  "keywords": ["ai", "coding", "cli", "parallel", "autonomous", "claude"],
+  "keywords": [
+    "ai",
+    "coding",
+    "cli",
+    "parallel",
+    "autonomous",
+    "claude"
+  ],
   "license": "MIT"
 }
