@@ -3,7 +3,6 @@ mod claude_runner;
 mod config;
 mod constants;
 mod context;
-mod dag;
 mod events;
 mod executor;
 mod git;
@@ -653,7 +652,6 @@ async fn run_app(
                                         let branch_tx = tx.clone();
                                         let mr = app.model_routing;
                                         let om = app.override_model.clone();
-                                        let ctx = app.claude_md_content.clone();
                                         let pl = app.parallel_limit;
                                         let ts = app.timeout_secs;
                                         let wc = app.with_critic;
@@ -683,7 +681,7 @@ async fn run_app(
                                                     return;
                                                 }
                                             }
-                                            spawn_executor(prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws });
+                                            spawn_executor(prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws });
                                         });
                                     }
                                     Err(e) => {
@@ -712,7 +710,6 @@ async fn run_app(
                                     let branch_tx = tx.clone();
                                     let mr = app.model_routing;
                                     let om = app.override_model.clone();
-                                    let ctx = app.claude_md_content.clone();
                                     let pl = app.parallel_limit;
                                     let ts = app.timeout_secs;
                                     let wc = app.with_critic;
@@ -742,7 +739,7 @@ async fn run_app(
                                                 return;
                                             }
                                         }
-                                        spawn_executor(exec_prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws });
+                                        spawn_executor(exec_prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws });
                                     });
                                 }
                             }
@@ -891,8 +888,6 @@ fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEven
                 prompt: prompt.clone(),
                 cwd: cwd.clone(),
                 model: model.clone(),
-                timeout_secs: 600,
-                stream_json: false,
             };
 
             let output = claude_runner::spawn_claude_json(&config).await?;
@@ -990,8 +985,6 @@ async fn run_claude_planner(goal: &str, cwd: &Path, model: Option<&str>, context
         prompt,
         cwd: cwd.to_path_buf(),
         model: model.map(|s| s.to_string()),
-        timeout_secs: 600,
-        stream_json: false,
     };
 
     let output = claude_runner::spawn_claude_json(&config).await?;

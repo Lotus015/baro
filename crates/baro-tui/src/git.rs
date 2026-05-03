@@ -1,14 +1,19 @@
+//! Pre-orchestration git helpers used by main.rs.
+//!
+//! The TS Mozaik orchestrator (`packages/baro-orchestrator/src/git.ts`)
+//! owns all per-story git activity (push with retry, pull --rebase,
+//! file-stat collection). This module survives only for the
+//! welcome-screen → planning flow which still needs to set up the
+//! `baro/<name>` branch in Rust before handing control off to the
+//! orchestrator.
+
 use std::path::Path;
 
 use tokio::process::Command;
-use tokio::sync::Mutex;
 
-use crate::events::BaroEvent;
 use crate::utils::BaroResult;
-use tokio::sync::mpsc;
 
-// ─── Get current branch ──────────────────────────────────────
-
+/// Return the name of the currently checked-out branch in `cwd`.
 pub(crate) async fn get_current_branch(cwd: &Path) -> BaroResult<String> {
     let output = Command::new("git")
         .args(["branch", "--show-current"])
@@ -24,10 +29,9 @@ pub(crate) async fn get_current_branch(cwd: &Path) -> BaroResult<String> {
     Ok(branch_name)
 }
 
-// ─── Create or checkout branch ───────────────────────────────
-
+/// Create a new branch (or checkout if it already exists) and best-effort
+/// push it with upstream tracking. Push failures are non-fatal.
 pub async fn create_or_checkout_branch(cwd: &Path, branch_name: &str) -> BaroResult<()> {
-    // Try creating a new branch
     let create = Command::new("git")
         .args(["checkout", "-b", branch_name])
         .current_dir(cwd)
@@ -36,7 +40,6 @@ pub async fn create_or_checkout_branch(cwd: &Path, branch_name: &str) -> BaroRes
         .map_err(|e| format!("Failed to run git checkout -b: {}", e))?;
 
     if !create.status.success() {
-        // Branch likely exists, try checking it out
         let checkout = Command::new("git")
             .args(["checkout", branch_name])
             .current_dir(cwd)
@@ -46,11 +49,12 @@ pub async fn create_or_checkout_branch(cwd: &Path, branch_name: &str) -> BaroRes
 
         if !checkout.status.success() {
             let stderr = String::from_utf8_lossy(&checkout.stderr).trim().to_string();
-            return Err(format!("Failed to checkout branch '{}': {}", branch_name, stderr).into());
+            return Err(
+                format!("Failed to checkout branch '{}': {}", branch_name, stderr).into(),
+            );
         }
     }
 
-    // Best-effort push with upstream tracking
     let push = Command::new("git")
         .args(["push", "-u", "origin", branch_name])
         .current_dir(cwd)
@@ -60,285 +64,19 @@ pub async fn create_or_checkout_branch(cwd: &Path, branch_name: &str) -> BaroRes
     match push {
         Ok(output) if !output.status.success() => {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            eprintln!("[git] push -u origin {} failed (best-effort): {}", branch_name, stderr);
+            eprintln!(
+                "[git] push -u origin {} failed (best-effort): {}",
+                branch_name, stderr
+            );
         }
         Err(e) => {
-            eprintln!("[git] push -u origin {} failed (best-effort): {}", branch_name, e);
+            eprintln!(
+                "[git] push -u origin {} failed (best-effort): {}",
+                branch_name, e
+            );
         }
         _ => {}
     }
 
     Ok(())
-}
-
-// ─── Safe pull rebase (best-effort, never fatal) ────────────
-
-pub(crate) async fn safe_pull_rebase(
-    cwd: &Path,
-    story_id: &str,
-    tx: &mpsc::Sender<BaroEvent>,
-) {
-    // Check if remote "origin" exists
-    let remote_check = Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(cwd)
-        .output()
-        .await;
-
-    let has_remote = remote_check.map(|o| o.status.success()).unwrap_or(false);
-    if !has_remote {
-        let _ = tx
-            .send(BaroEvent::StoryLog {
-                id: story_id.to_string(),
-                line: "[git] no remote, skipping pull".to_string(),
-            })
-            .await;
-        return;
-    }
-
-    let branch_name = match get_current_branch(cwd).await {
-        Ok(b) => b,
-        Err(_) => {
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: story_id.to_string(),
-                    line: "[git] no branch, skipping pull".to_string(),
-                })
-                .await;
-            return;
-        }
-    };
-
-    // Check if remote branch exists
-    let remote_branch_check = Command::new("git")
-        .args(["ls-remote", "--heads", "origin", &branch_name])
-        .current_dir(cwd)
-        .output()
-        .await;
-
-    let has_remote_branch = remote_branch_check
-        .map(|o| o.status.success() && !o.stdout.is_empty())
-        .unwrap_or(false);
-
-    if !has_remote_branch {
-        let _ = tx
-            .send(BaroEvent::StoryLog {
-                id: story_id.to_string(),
-                line: "[git] remote branch not found, skipping pull".to_string(),
-            })
-            .await;
-        return;
-    }
-
-    let _ = tx
-        .send(BaroEvent::StoryLog {
-            id: story_id.to_string(),
-            line: "[git] pulling latest...".to_string(),
-        })
-        .await;
-
-    // Stash any local changes (prd.json updates etc.)
-    let _ = Command::new("git")
-        .args(["stash", "--include-untracked"])
-        .current_dir(cwd)
-        .output()
-        .await;
-
-    // Pull --rebase
-    let pull = Command::new("git")
-        .args(["pull", "--rebase", "origin", &branch_name])
-        .current_dir(cwd)
-        .output()
-        .await;
-
-    let pull_ok = pull.map(|o| o.status.success()).unwrap_or(false);
-
-    if !pull_ok {
-        // Abort failed rebase
-        let _ = Command::new("git")
-            .args(["rebase", "--abort"])
-            .current_dir(cwd)
-            .output()
-            .await;
-
-        let _ = tx
-            .send(BaroEvent::StoryLog {
-                id: story_id.to_string(),
-                line: "[git] pull conflict, continuing without pull".to_string(),
-            })
-            .await;
-    } else {
-        let _ = tx
-            .send(BaroEvent::StoryLog {
-                id: story_id.to_string(),
-                line: "[git] pull ok".to_string(),
-            })
-            .await;
-    }
-
-    // Pop stash (best-effort)
-    let _ = Command::new("git")
-        .args(["stash", "pop"])
-        .current_dir(cwd)
-        .output()
-        .await;
-}
-
-// ─── Git file stats ──────────────────────────────────────────
-
-pub(crate) async fn get_git_file_stats(cwd: &Path, base_sha: Option<&str>) -> (u32, u32) {
-    let args: Vec<&str> = if let Some(sha) = base_sha {
-        vec!["diff", "--name-status", sha, "HEAD"]
-    } else {
-        vec!["diff", "--name-status", "HEAD~1", "HEAD"]
-    };
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(cwd)
-        .output()
-        .await;
-
-    let Ok(output) = output else {
-        return (0, 0);
-    };
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut created = 0u32;
-    let mut modified = 0u32;
-    for line in text.lines() {
-        if line.starts_with('A') {
-            created += 1;
-        } else if line.starts_with('M') || line.starts_with('R') {
-            modified += 1;
-        }
-    }
-    (created, modified)
-}
-
-// ─── Update prd.json ─────────────────────────────────────────
-
-pub(crate) fn update_prd_story(prd_path: &Path, story_id: &str, duration_secs: u64) -> std::io::Result<()> {
-    let content = std::fs::read_to_string(prd_path)?;
-    let mut prd: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-    if let Some(stories) = prd.get_mut("userStories").and_then(|s| s.as_array_mut()) {
-        for story in stories {
-            if story.get("id").and_then(|id| id.as_str()) == Some(story_id) {
-                story["passes"] = serde_json::Value::Bool(true);
-                story["completedAt"] =
-                    serde_json::Value::String(chrono::Utc::now().to_rfc3339());
-                story["durationSecs"] =
-                    serde_json::Value::Number(serde_json::Number::from(duration_secs));
-            }
-        }
-    }
-
-    let output = serde_json::to_string_pretty(&prd)
-        .map_err(std::io::Error::other)?;
-    std::fs::write(prd_path, format!("{}\n", output))?;
-    Ok(())
-}
-
-// ─── Push with retry ─────────────────────────────────────────
-
-pub(crate) async fn git_push_with_retry(
-    git_mutex: &Mutex<()>,
-    cwd: &Path,
-    story_id: &str,
-    tx: &mpsc::Sender<BaroEvent>,
-) -> BaroResult<()> {
-    let _git_lock = git_mutex.lock().await;
-
-    // Check if remote exists
-    let remote_check = Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(cwd)
-        .output()
-        .await;
-    if !remote_check.map(|o| o.status.success()).unwrap_or(false) {
-        let _ = tx
-            .send(BaroEvent::StoryLog {
-                id: story_id.to_string(),
-                line: "[git] no remote, skipping push".to_string(),
-            })
-            .await;
-        return Ok(());
-    }
-
-    let branch_name = get_current_branch(cwd).await?;
-
-    let max_attempts = crate::constants::GIT_PUSH_MAX_ATTEMPTS;
-    let mut last_stderr = String::new();
-    for attempt in 1..=max_attempts {
-        let _ = tx
-            .send(BaroEvent::StoryLog {
-                id: story_id.to_string(),
-                line: "[git] pushing...".to_string(),
-            })
-            .await;
-
-        let push = Command::new("git")
-            .args(["push", "origin", &branch_name])
-            .current_dir(cwd)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to push: {}", e))?;
-
-        if push.status.success() {
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: story_id.to_string(),
-                    line: "[git] push ok".to_string(),
-                })
-                .await;
-            return Ok(());
-        }
-
-        last_stderr = String::from_utf8_lossy(&push.stderr).trim().to_string();
-
-        if attempt == max_attempts {
-            break;
-        }
-
-        // Pull --rebase and retry
-        let _ = tx
-            .send(BaroEvent::StoryLog {
-                id: story_id.to_string(),
-                line: "[git] push failed, pulling and retrying...".to_string(),
-            })
-            .await;
-
-        let pull = Command::new("git")
-            .args(["pull", "--rebase", "origin", &branch_name])
-            .current_dir(cwd)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to pull --rebase: {}", e))?;
-
-        if !pull.status.success() {
-            // Rebase conflict — abort and return error
-            let _ = Command::new("git")
-                .args(["rebase", "--abort"])
-                .current_dir(cwd)
-                .output()
-                .await;
-
-            let _ = tx
-                .send(BaroEvent::StoryLog {
-                    id: story_id.to_string(),
-                    line: "[git] conflict detected, skipping".to_string(),
-                })
-                .await;
-            return Err("Rebase conflict detected, push skipped".into());
-        }
-    }
-
-    let _ = tx
-        .send(BaroEvent::StoryLog {
-            id: story_id.to_string(),
-            line: "[git] push failed after 3 attempts".to_string(),
-        })
-        .await;
-    Err(format!("Push failed after 3 attempts: {}", last_stderr).into())
 }
