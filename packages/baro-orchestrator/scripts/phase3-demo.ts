@@ -85,20 +85,24 @@ function buildPrd(): PrdFile {
             {
                 id: "S1",
                 priority: 1,
-                title: "Add LICENSE file",
+                title: "Add modified MIT LICENSE",
                 description:
-                    "Create a LICENSE file at the repository root containing a standard MIT " +
-                    "license. The copyright line MUST use the year 2026 (the current year is " +
-                    "2026-05-03) and the copyright holder MUST be 'Baro Project'. " +
-                    "Use exactly this copyright line: 'Copyright (c) 2026 Baro Project'. " +
+                    "Create a LICENSE file at the repository root containing the standard MIT " +
+                    "license text for 'Baro Project' (year 2026), but with TWO modifications " +
+                    "from the canonical text:\n" +
+                    "  (1) every occurrence of the phrase 'AS IS' must be replaced with " +
+                    "'AS PROVIDED'.\n" +
+                    "  (2) replace the legacy '(c)' with the Unicode copyright symbol '©'.\n" +
                     "After creating the file, commit it with the message 'add LICENSE'.",
                 dependsOn: [],
                 retries: 0,
                 acceptance: [
                     "LICENSE file exists at the repo root",
-                    "LICENSE file contains the year 2026 (not 2025 or any other year)",
-                    "LICENSE file contains the copyright holder 'Baro Project'",
-                    "commit message is 'add LICENSE'",
+                    "LICENSE contains the copyright holder 'Baro Project' and the year 2026",
+                    "LICENSE contains the phrase 'AS PROVIDED' at least once",
+                    "LICENSE does NOT contain the literal phrase 'AS IS' anywhere",
+                    "LICENSE uses the Unicode '©' symbol, not the ASCII fallback '(c)' or '(C)'",
+                    "commit message is exactly 'add LICENSE'",
                 ],
                 tests: [],
                 passes: false,
@@ -134,11 +138,45 @@ function countCritiqueItems(auditPath: string): number {
     return count
 }
 
-function yearFoundInLicense(cwd: string): boolean {
+interface LicenseCheck {
+    exists: boolean
+    yearOk: boolean
+    holderOk: boolean
+    asProvidedOk: boolean
+    noAsIs: boolean
+    unicodeC: boolean
+    allPass: boolean
+}
+
+function inspectLicense(cwd: string): LicenseCheck {
     const licensePath = join(cwd, "LICENSE")
-    if (!existsSync(licensePath)) return false
+    if (!existsSync(licensePath)) {
+        return {
+            exists: false,
+            yearOk: false,
+            holderOk: false,
+            asProvidedOk: false,
+            noAsIs: false,
+            unicodeC: false,
+            allPass: false,
+        }
+    }
     const contents = readFileSync(licensePath, "utf8")
-    return contents.includes("2026")
+    const yearOk = contents.includes("2026")
+    const holderOk = contents.includes("Baro Project")
+    const asProvidedOk = /\bAS\s+PROVIDED\b/.test(contents)
+    const noAsIs = !/\bAS\s+IS\b/.test(contents)
+    const unicodeC = contents.includes("©") && !/\([cC]\)/.test(contents)
+    return {
+        exists: true,
+        yearOk,
+        holderOk,
+        asProvidedOk,
+        noAsIs,
+        unicodeC,
+        allPass:
+            yearOk && holderOk && asProvidedOk && noAsIs && unicodeC,
+    }
 }
 
 // ─── Run a single pass ────────────────────────────────────────────────────────
@@ -146,7 +184,7 @@ function yearFoundInLicense(cwd: string): boolean {
 interface PassResult {
     auditLog: string
     elapsedSecs: number
-    yearFound: boolean
+    license: LicenseCheck
 }
 
 async function runPass(
@@ -178,12 +216,15 @@ async function runPass(
         `[phase3] pass ${label} done in ${elapsed}s — passed=${result.summary.completedStories.length} failed=${result.summary.failedStories.length}\n`,
     )
 
-    const yearFound = yearFoundInLicense(cwd)
+    const license = inspectLicense(cwd)
     process.stderr.write(
-        `[phase3] pass ${label}: LICENSE year=2026 found? ${yearFound}\n`,
+        `[phase3] pass ${label}: license check — ` +
+            `exists=${license.exists} year2026=${license.yearOk} holder=${license.holderOk} ` +
+            `asProvided=${license.asProvidedOk} noAsIs=${license.noAsIs} unicodeC=${license.unicodeC} ` +
+            `→ ${license.allPass ? "PASS" : "FAIL"}\n`,
     )
 
-    return { auditLog, elapsedSecs: elapsed, yearFound }
+    return { auditLog, elapsedSecs: elapsed, license }
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -206,15 +247,32 @@ async function main(): Promise<void> {
     const critiqueCount = countCritiqueItems(passB.auditLog)
 
     process.stderr.write(`\n[phase3] ──── tally ────\n`)
+    const fmt = (l: typeof passA.license) =>
+        `exists=${l.exists} year=${l.yearOk} holder=${l.holderOk} ` +
+        `asProvided=${l.asProvidedOk} noAsIs=${l.noAsIs} unicodeC=${l.unicodeC} ` +
+        `→ ${l.allPass ? "PASS" : "FAIL"}`
     process.stderr.write(
-        `  control   (withCritic=false): LICENSE year=2026 found? ${passA.yearFound}\n`,
+        `  control   (withCritic=false): ${fmt(passA.license)}\n`,
     )
     process.stderr.write(
-        `  treatment (withCritic=true):  LICENSE year=2026 found? ${passB.yearFound}\n`,
+        `  treatment (withCritic=true):  ${fmt(passB.license)}\n`,
     )
     process.stderr.write(
         `  treatment CritiqueItem count: ${critiqueCount}\n`,
     )
+    if (!passA.license.allPass && passB.license.allPass) {
+        process.stderr.write(
+            `\n[phase3] ✓ Critic delivered measurable value: control failed acceptance, treatment passed.\n`,
+        )
+    } else if (passA.license.allPass && passB.license.allPass) {
+        process.stderr.write(
+            `\n[phase3] ⚠ Both passes met acceptance — Critic infrastructure ran (CritiqueItem=${critiqueCount}) but the trap didn't fool the implementer.\n`,
+        )
+    } else if (!passA.license.allPass && !passB.license.allPass) {
+        process.stderr.write(
+            `\n[phase3] ✗ Both passes failed — story prompt may need refinement.\n`,
+        )
+    }
     process.stderr.write(
         `\n[phase3] wall clock: control=${passA.elapsedSecs}s  treatment=${passB.elapsedSecs}s\n`,
     )

@@ -28,6 +28,14 @@ pub struct OrchestratorConfig {
     pub skip_git: bool,
     /// Optional path for the audit JSONL log.
     pub audit_log: Option<PathBuf>,
+    /// Enable Critic (Phase 3 live acceptance evaluator). Default: false.
+    pub with_critic: bool,
+    /// Model for Critic (default "haiku" inside the orchestrator).
+    pub critic_model: Option<String>,
+    /// Disable Librarian (Phase 2 cross-agent memory). Default: false (Librarian on).
+    pub with_librarian: bool,
+    /// Disable Sentry (Phase 2 file conflict detector). Default: false (Sentry on).
+    pub with_sentry: bool,
 }
 
 /// Spawn the orchestrator subprocess and return a channel that receives
@@ -166,6 +174,18 @@ fn build_command(entry: &EntryPoint, cfg: &OrchestratorConfig) -> Command {
     }
     if let Some(p) = &cfg.audit_log {
         cmd.arg("--audit-log").arg(p);
+    }
+    if cfg.with_critic {
+        cmd.arg("--with-critic");
+    }
+    if let Some(m) = &cfg.critic_model {
+        cmd.arg("--critic-model").arg(m);
+    }
+    if !cfg.with_librarian {
+        cmd.arg("--no-librarian");
+    }
+    if !cfg.with_sentry {
+        cmd.arg("--no-sentry");
     }
     cmd
 }

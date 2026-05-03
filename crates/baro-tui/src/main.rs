@@ -128,6 +128,24 @@ struct Cli {
     /// Generate plan only, do not execute stories
     #[arg(long)]
     dry_run: bool,
+
+    /// Enable the live Critic (Phase 3): evaluates each agent turn against
+    /// its acceptance criteria via `claude --model haiku` and injects
+    /// corrective feedback when a turn doesn't satisfy them.
+    #[arg(long)]
+    with_critic: bool,
+
+    /// Model used by the Critic when --with-critic is on. Default: "haiku".
+    #[arg(long)]
+    critic_model: Option<String>,
+
+    /// Disable the Librarian (cross-agent runtime memory). Default: ON.
+    #[arg(long)]
+    no_librarian: bool,
+
+    /// Disable the Sentry (file-touch conflict detector). Default: ON.
+    #[arg(long)]
+    no_sentry: bool,
 }
 
 enum AppEvent {
@@ -319,6 +337,19 @@ async fn run_app(
     } else if cli.no_model_routing {
         app.override_model = Some("opus".to_string());
         app.model_routing = false;
+    }
+
+    if cli.with_critic {
+        app.with_critic = true;
+    }
+    if let Some(ref m) = cli.critic_model {
+        app.critic_model = Some(m.clone());
+    }
+    if cli.no_librarian {
+        app.with_librarian = false;
+    }
+    if cli.no_sentry {
+        app.with_sentry = false;
     }
 
     let (tx, mut rx) = mpsc::channel::<AppEvent>(256);
@@ -625,6 +656,10 @@ async fn run_app(
                                         let ctx = app.claude_md_content.clone();
                                         let pl = app.parallel_limit;
                                         let ts = app.timeout_secs;
+                                        let wc = app.with_critic;
+                                        let cm = app.critic_model.clone();
+                                        let wl = app.with_librarian;
+                                        let ws = app.with_sentry;
                                         let err_tx = tx.clone();
                                         tokio::spawn(async move {
                                             if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
@@ -648,7 +683,7 @@ async fn run_app(
                                                     return;
                                                 }
                                             }
-                                            spawn_executor(prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx });
+                                            spawn_executor(prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws });
                                         });
                                     }
                                     Err(e) => {
@@ -680,6 +715,10 @@ async fn run_app(
                                     let ctx = app.claude_md_content.clone();
                                     let pl = app.parallel_limit;
                                     let ts = app.timeout_secs;
+                                    let wc = app.with_critic;
+                                    let cm = app.critic_model.clone();
+                                    let wl = app.with_librarian;
+                                    let ws = app.with_sentry;
                                     let err_tx = tx.clone();
                                     tokio::spawn(async move {
                                         if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
@@ -703,7 +742,7 @@ async fn run_app(
                                                 return;
                                             }
                                         }
-                                        spawn_executor(exec_prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx });
+                                        spawn_executor(exec_prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, context_content: ctx, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws });
                                     });
                                 }
                             }
@@ -932,6 +971,10 @@ fn spawn_executor(
         default_model,
         skip_git: false,
         audit_log: None,
+        with_critic: config.with_critic,
+        critic_model: config.critic_model,
+        with_librarian: config.with_librarian,
+        with_sentry: config.with_sentry,
     };
     orchestrator_client::spawn_orchestrator(orch_cfg, exec_tx);
 }

@@ -52,13 +52,20 @@ fn default_retries() -> u32 {
     2
 }
 
-/// Configuration passed to [`run_executor`] and friends.
+/// Configuration passed to [`run_executor`] and friends. The legacy
+/// in-process executor is no longer invoked at runtime (see
+/// `orchestrator_client.rs`); this struct survives only as the call-site
+/// shape `spawn_executor` accepts before forwarding to the TS orchestrator.
 pub struct ExecutorConfig {
     pub parallel: u32,
     pub timeout_secs: u64,
     pub model_routing: bool,
     pub override_model: Option<String>,
     pub context_content: Option<String>,
+    pub with_critic: bool,
+    pub critic_model: Option<String>,
+    pub with_librarian: bool,
+    pub with_sentry: bool,
 }
 
 /// Per-story execution parameters (avoids too-many-arguments).
@@ -1643,7 +1650,7 @@ pub async fn run_executor(
     tx: mpsc::Sender<BaroEvent>,
     config: ExecutorConfig,
 ) {
-    let ExecutorConfig { parallel, timeout_secs, model_routing, override_model, context_content } = config;
+    let ExecutorConfig { parallel, timeout_secs, model_routing, override_model, context_content, .. } = config;
     let prd_path = cwd.join("prd.json");
     let stories = &prd.user_stories;
     let incomplete: Vec<&PrdStory> = stories.iter().filter(|s| !s.passes).collect();

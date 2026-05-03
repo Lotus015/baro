@@ -33,6 +33,10 @@ interface CliArgs {
     noGit: boolean
     noTuiEvents: boolean
     auditLog?: string
+    withCritic: boolean
+    criticModel?: string
+    noLibrarian: boolean
+    noSentry: boolean
     help: boolean
 }
 
@@ -44,6 +48,9 @@ function parseArgs(argv: string[]): CliArgs {
         timeout: 600,
         noGit: false,
         noTuiEvents: false,
+        withCritic: false,
+        noLibrarian: false,
+        noSentry: false,
         help: false,
     }
     for (let i = 0; i < argv.length; i++) {
@@ -76,6 +83,18 @@ function parseArgs(argv: string[]): CliArgs {
                 break
             case "--audit-log":
                 args.auditLog = required(argv, ++i, "--audit-log")
+                break
+            case "--with-critic":
+                args.withCritic = true
+                break
+            case "--critic-model":
+                args.criticModel = required(argv, ++i, "--critic-model")
+                break
+            case "--no-librarian":
+                args.noLibrarian = true
+                break
+            case "--no-sentry":
+                args.noSentry = true
                 break
             default:
                 process.stderr.write(`[cli] unknown flag: ${a}\n`)
@@ -111,6 +130,10 @@ function printHelp(): void {
             "  --no-git              Skip git lifecycle (branch / push)",
             "  --no-tui-events       Skip BaroEvent JSON emission",
             "  --audit-log <path>    Persist all bus events to JSONL",
+            "  --with-critic         Enable Critic (live acceptance evaluator)",
+            "  --critic-model <name> Model for Critic (default: haiku)",
+            "  --no-librarian        Disable Librarian (cross-agent memory)",
+            "  --no-sentry           Disable Sentry (file conflict detector)",
             "  -h, --help            Show this message",
             "",
         ].join("\n"),
@@ -141,6 +164,10 @@ async function main(): Promise<void> {
         emitTuiEvents: !args.noTuiEvents,
         withGit: args.noGit ? false : undefined,
         auditLogPath: args.auditLog,
+        withCritic: args.withCritic,
+        criticModel: args.criticModel,
+        withLibrarian: args.noLibrarian ? false : undefined,
+        withSentry: args.noSentry ? false : undefined,
     }
 
     process.stderr.write(
