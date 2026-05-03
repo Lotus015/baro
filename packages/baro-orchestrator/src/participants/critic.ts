@@ -2,25 +2,37 @@
  * Critic — live acceptance-criteria evaluator.
  *
  * Observes ClaudeResultItem events on the bus. For each watched agent that
- * completes a turn without error, the Critic calls the Anthropic API and asks
- * the model whether the output satisfies the agent's acceptance criteria.
+ * completes a turn without error, the Critic spawns a short-lived
+ * `claude --print --model <haiku-default>` subprocess to ask whether the
+ * output satisfies the agent's acceptance criteria.
  *
  * The verdict is *always* published as a CritiqueItem (audit trail). On
  * "fail", an AgentTargetedMessageItem is emitted back to the agent as its
  * next conversational turn — up to `maxEmissionsPerAgent` times, after which
  * corrective messages are suppressed but CritiqueItem-s keep accumulating.
  *
+ * Architectural note: Critic uses the Claude CLI subprocess (same auth path
+ * as every other agent in this system). It does NOT call the Anthropic SDK
+ * directly because that would fragment the auth model — Claude Code runs
+ * via OAuth session, not via ANTHROPIC_API_KEY. The CLI subprocess inherits
+ * whatever auth `claude` is configured with, so Critic just works wherever
+ * `claude` does.
+ *
  * Library-grade: no imports from prd.ts, story-agent.ts, or conductor.ts.
  */
 
+import { execFile } from "child_process"
+import { promisify } from "util"
+
 import { ContextItem, Participant } from "@mozaik-ai/core"
-import Anthropic from "@anthropic-ai/sdk"
 
 import {
     AgentTargetedMessageItem,
     ClaudeResultItem,
     CritiqueItem,
 } from "../types.js"
+
+const execFileAsync = promisify(execFile)
 
 const VERDICT_SYSTEM_PROMPT = `\
 You are a strict acceptance-criteria evaluator. You will receive:
@@ -45,32 +57,45 @@ export interface CriticOptions {
     targets: ReadonlyMap<string, readonly string[]>
     /** Max corrective AgentTargetedMessageItem-s per agent. Default: 2. */
     maxEmissionsPerAgent?: number
-    /** Anthropic model used for verdict calls. Default: "claude-haiku-4-5". */
+    /** Claude model used for verdict calls. Default: "haiku". */
     model?: string
-    /** Anthropic API key. Default: process.env.ANTHROPIC_API_KEY. */
-    apiKey?: string
+    /** Path to the `claude` binary. Default: "claude" (resolved via PATH). */
+    claudeBin?: string
+    /** Per-evaluation timeout in milliseconds. Default: 60_000. */
+    timeoutMs?: number
 }
 
 export class Critic extends Participant {
     private readonly opts: Required<CriticOptions>
-    private readonly client: Anthropic
     /** agentId → number of AgentTargetedMessageItem-s emitted so far. */
     private readonly emissions = new Map<string, number>()
     /** agentId → number of result turns seen (for CritiqueItem.turn). */
     private readonly turnCount = new Map<string, number>()
+    /**
+     * Critic's evaluate() spawns an async `claude --print` subprocess.
+     * Mozaik's deliverContextItem fan-out doesn't await onContextItem's
+     * returned promise, so we track in-flight evaluations here and let
+     * callers (e.g. orchestrate()) await `idle()` before tearing down.
+     */
+    private readonly pending = new Set<Promise<void>>()
 
     constructor(opts: CriticOptions) {
         super()
         this.opts = {
             maxEmissionsPerAgent: opts.maxEmissionsPerAgent ?? 2,
-            model: opts.model ?? "claude-haiku-4-5",
-            apiKey: opts.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "",
+            model: opts.model ?? "haiku",
+            claudeBin: opts.claudeBin ?? "claude",
+            timeoutMs: opts.timeoutMs ?? 60_000,
             targets: opts.targets,
         }
-        this.client = new Anthropic({ apiKey: this.opts.apiKey })
     }
 
-    async onContextItem(source: Participant, item: ContextItem): Promise<void> {
+    /** Resolves once every in-flight evaluation has emitted its CritiqueItem. */
+    async idle(): Promise<void> {
+        await Promise.allSettled([...this.pending])
+    }
+
+    async onContextItem(_source: Participant, item: ContextItem): Promise<void> {
         if (!(item instanceof ClaudeResultItem)) return
         if (item.isError || !item.resultText) return
 
@@ -80,40 +105,49 @@ export class Critic extends Participant {
         const turn = (this.turnCount.get(item.agentId) ?? 0) + 1
         this.turnCount.set(item.agentId, turn)
 
-        const { verdict, reasoning, violatedCriteria } = await this.evaluate(
-            item.resultText,
-            criteria,
-        )
+        const work = (async () => {
+            const { verdict, reasoning, violatedCriteria } = await this.evaluate(
+                item.resultText!,
+                criteria,
+            )
 
-        // Always emit audit trail.
-        const critiqueItem = new CritiqueItem(
-            item.agentId,
-            verdict,
-            reasoning,
-            violatedCriteria,
-            turn,
-            this.opts.model,
-        )
-        for (const env of this.getEnvironments()) {
-            env.deliverContextItem(this, critiqueItem)
-        }
+            // Always emit audit trail.
+            const critiqueItem = new CritiqueItem(
+                item.agentId,
+                verdict,
+                reasoning,
+                violatedCriteria,
+                turn,
+                this.opts.model,
+            )
+            for (const env of this.getEnvironments()) {
+                env.deliverContextItem(this, critiqueItem)
+            }
 
-        // Emit corrective message only on fail and under the per-agent cap.
-        if (verdict === "fail") {
-            const emitted = this.emissions.get(item.agentId) ?? 0
-            if (emitted < this.opts.maxEmissionsPerAgent) {
-                this.emissions.set(item.agentId, emitted + 1)
-                const text = buildCorrectiveMessage(reasoning, violatedCriteria)
-                const msg = new AgentTargetedMessageItem(
-                    item.agentId,
-                    text,
-                    { criticTurn: turn, emissionIndex: emitted + 1 },
-                )
-                for (const env of this.getEnvironments()) {
-                    env.deliverContextItem(this, msg)
+            // Emit corrective message only on fail and under the per-agent cap.
+            if (verdict === "fail") {
+                const emitted = this.emissions.get(item.agentId) ?? 0
+                if (emitted < this.opts.maxEmissionsPerAgent) {
+                    this.emissions.set(item.agentId, emitted + 1)
+                    const text = buildCorrectiveMessage(reasoning, violatedCriteria)
+                    const msg = new AgentTargetedMessageItem(
+                        item.agentId,
+                        text,
+                        { criticTurn: turn, emissionIndex: emitted + 1 },
+                    )
+                    for (const env of this.getEnvironments()) {
+                        env.deliverContextItem(this, msg)
+                    }
                 }
             }
-        }
+        })()
+
+        this.pending.add(work)
+        work.finally(() => {
+            this.pending.delete(work)
+        })
+
+        await work
     }
 
     private async evaluate(
@@ -124,25 +158,42 @@ export class Critic extends Participant {
         reasoning: string
         violatedCriteria: string[]
     }> {
+        const prompt = buildEvalPrompt(criteria, resultText)
+
         try {
-            const response = await this.client.messages.create({
-                model: this.opts.model,
-                max_tokens: 1024,
-                system: VERDICT_SYSTEM_PROMPT,
-                messages: [
-                    {
-                        role: "user",
-                        content: buildEvalPrompt(criteria, resultText),
-                    },
+            const { stdout } = await execFileAsync(
+                this.opts.claudeBin,
+                [
+                    "--print",
+                    "--output-format",
+                    "json",
+                    "--model",
+                    this.opts.model,
+                    "--permission-mode",
+                    "bypassPermissions",
+                    "--system-prompt",
+                    VERDICT_SYSTEM_PROMPT,
+                    "-p",
+                    prompt,
                 ],
-            })
+                {
+                    timeout: this.opts.timeoutMs,
+                    maxBuffer: 4 * 1024 * 1024,
+                },
+            )
 
-            const text = response.content
-                .filter((b): b is Anthropic.TextBlock => b.type === "text")
-                .map((b) => b.text)
-                .join("")
+            // `claude --output-format json` returns one JSON object on stdout
+            // with a `result` field containing the assistant's text answer
+            // (per packages/baro-app/scripts/SPIKE-FINDINGS.md).
+            const wrapper = JSON.parse(stdout) as { result?: string }
+            const verdictText =
+                typeof wrapper.result === "string" ? wrapper.result.trim() : ""
+            if (!verdictText) {
+                throw new Error("claude returned empty result")
+            }
 
-            const parsed = JSON.parse(text) as {
+            const verdictJson = extractVerdictJson(verdictText)
+            const parsed = JSON.parse(verdictJson) as {
                 verdict: "pass" | "fail"
                 reasoning: string
                 violated_criteria: string[]
@@ -158,7 +209,7 @@ export class Critic extends Participant {
         } catch (err) {
             return {
                 verdict: "fail",
-                reasoning: `Critic LLM call failed: ${String(err)}`,
+                reasoning: `Critic LLM call failed: ${String((err as Error)?.message ?? err)}`,
                 violatedCriteria: ["[critic error — could not evaluate]"],
             }
         }
@@ -198,4 +249,37 @@ function buildCorrectiveMessage(
     }
     lines.push("", "Please address the above and resubmit your work.")
     return lines.join("\n")
+}
+
+/**
+ * Claude's response to the verdict prompt should be just the JSON object,
+ * but the model occasionally wraps it in a markdown fence or adds a
+ * leading/trailing sentence even with strict instructions. Tolerate that
+ * by extracting the first balanced `{...}` block.
+ */
+function extractVerdictJson(text: string): string {
+    const trimmed = text.trim()
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        return trimmed
+    }
+    const fenceMatch = trimmed.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/)
+    if (fenceMatch) {
+        return fenceMatch[1]!
+    }
+    const start = trimmed.indexOf("{")
+    if (start < 0) {
+        throw new Error(`no JSON object found in critic response: ${trimmed.slice(0, 200)}`)
+    }
+    let depth = 0
+    for (let i = start; i < trimmed.length; i++) {
+        const ch = trimmed[i]
+        if (ch === "{") depth += 1
+        else if (ch === "}") {
+            depth -= 1
+            if (depth === 0) {
+                return trimmed.slice(start, i + 1)
+            }
+        }
+    }
+    throw new Error(`unbalanced JSON object in critic response: ${trimmed.slice(0, 200)}`)
 }

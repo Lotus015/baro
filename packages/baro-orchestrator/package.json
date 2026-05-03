@@ -17,7 +17,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.55.0",
     "@mozaik-ai/core": "^3.6.5"
   },
   "devDependencies": {

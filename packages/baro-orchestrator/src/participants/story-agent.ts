@@ -193,11 +193,11 @@ export class StoryAgent extends Participant {
     async onContextItem(source: Participant, item: ContextItem): Promise<void> {
         if (source === this) return
 
+        // StoryAgent observes AgentTargetedMessageItem and ClaudeResultItem
+        // for lifecycle/timing purposes only. The actual stdin forwarding
+        // is owned by ClaudeCliParticipant.onContextItem to avoid
+        // double-delivery.
         if (item instanceof AgentTargetedMessageItem && item.recipientId === this.spec.id) {
-            const claude = this.currentClaude
-            if (claude && claude.getPhase() === "running") {
-                claude.sendUserMessage(item.text)
-            }
             this.notifyStoryMessage?.()
         }
 

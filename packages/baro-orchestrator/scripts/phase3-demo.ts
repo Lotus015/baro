@@ -36,17 +36,6 @@ import { join } from "path"
 import { orchestrate } from "../src/orchestrate.js"
 import type { PrdFile } from "../src/main.js"
 
-// ─── Guard: ANTHROPIC_API_KEY ────────────────────────────────────────────────
-
-if (!process.env.ANTHROPIC_API_KEY) {
-    process.stderr.write(
-        "[phase3] ERROR: ANTHROPIC_API_KEY is not set.\n" +
-            "         The Critic requires a live Anthropic API call.\n" +
-            "         Export the key and retry.\n",
-    )
-    process.exit(1)
-}
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function git(cwd: string, args: string[]): string {

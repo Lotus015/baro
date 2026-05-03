@@ -20,6 +20,7 @@ import { mapClaudeEvent } from "../stream-json-mapper.js"
 import {
     AgentPhase,
     AgentStateItem,
+    AgentTargetedMessageItem,
     ClaudeResultItem,
     ClaudeSystemItem,
 } from "../types.js"
@@ -203,9 +204,19 @@ export class ClaudeCliParticipant extends Participant {
         this.proc?.kill(signal)
     }
 
-    async onContextItem(_source: Participant, _item: ContextItem): Promise<void> {
-        // AgentTargetedMessageItem forwarding is handled exclusively by
-        // StoryAgent.onContextItem to avoid double-delivery.
+    async onContextItem(source: Participant, item: ContextItem): Promise<void> {
+        if (source === this) return
+        // ClaudeCliParticipant owns bus → stdin forwarding for messages
+        // addressed to its agentId. StoryAgent (when present) observes
+        // these items for lifecycle/timing purposes only — it does NOT
+        // also write to stdin, to avoid double-delivery.
+        if (
+            item instanceof AgentTargetedMessageItem &&
+            item.recipientId === this.agentId
+        ) {
+            if (!this.proc?.stdin) return
+            this.sendUserMessage(item.text)
+        }
     }
 
     private buildArgs(): string[] {

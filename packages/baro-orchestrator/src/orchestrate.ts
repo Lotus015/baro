@@ -85,10 +85,17 @@ export interface OrchestrateConfig {
     /**
      * Whether to wire the Critic (live acceptance-criteria evaluator).
      * When on, each story agent's output is evaluated against its
-     * acceptance criteria via a Haiku LLM call. Requires ANTHROPIC_API_KEY.
+     * acceptance criteria via a `claude --model haiku` subprocess. Auth
+     * comes through the Claude CLI's existing config — no API key needed.
      * Default: false (opt-in).
      */
     withCritic?: boolean
+    /**
+     * Model passed to the Critic when withCritic is on. Default: "haiku".
+     * Use any alias `claude --model` accepts ("haiku", "sonnet", "opus")
+     * or a fully qualified ID.
+     */
+    criticModel?: string
     /** Hooks for receiving Operator commands externally (Rust TUI). */
     operatorHooks?: {
         onAbort?: (storyId: string) => void
@@ -145,19 +152,21 @@ export async function orchestrate(
     if (sentry) sentry.join(env)
 
     // Phase-3 observer — Critic (live acceptance-criteria evaluator).
-    // Opt-in (default OFF). Requires ANTHROPIC_API_KEY.
+    // Opt-in (default OFF). Spawns `claude --model haiku` subprocesses
+    // for each evaluation, inheriting Claude CLI auth.
+    let critic: Critic | null = null
     if (config.withCritic) {
-        if (!process.env.ANTHROPIC_API_KEY) {
-            process.stderr.write("critic disabled: no ANTHROPIC_API_KEY\n")
-        } else {
-            const prd = loadPrd(config.prdPath)
-            const targets = new Map<string, readonly string[]>(
-                prd.userStories
-                    .filter((s) => s.acceptance && s.acceptance.length > 0)
-                    .map((s) => [s.id, s.acceptance] as [string, readonly string[]]),
-            )
-            new Critic({ targets }).join(env)
-        }
+        const prd = loadPrd(config.prdPath)
+        const targets = new Map<string, readonly string[]>(
+            prd.userStories
+                .filter((s) => s.acceptance && s.acceptance.length > 0)
+                .map((s) => [s.id, s.acceptance] as [string, readonly string[]]),
+        )
+        critic = new Critic({
+            targets,
+            model: config.criticModel ?? "haiku",
+        })
+        critic.join(env)
     }
 
     // Conductor — the work driver.
@@ -242,6 +251,10 @@ export async function orchestrate(
     }
 
     const summary = await conductor.run(env)
+
+    // Drain in-flight Critic evaluations so the audit log and any
+    // CritiqueItem-emitted side effects land before this function returns.
+    if (critic) await critic.idle()
 
     let filesCreated = 0
     let filesModified = 0
