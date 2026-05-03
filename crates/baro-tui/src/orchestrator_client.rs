@@ -1,0 +1,231 @@
+//! Client for the TypeScript Mozaik orchestrator subprocess.
+//!
+//! Spawns `tsx scripts/cli.ts` (in dev) from the baro-orchestrator
+//! workspace package, streams its stdout (line-delimited BaroEvent JSON)
+//! into the same `mpsc::Sender<BaroEvent>` channel the Rust executor
+//! used to feed, and surfaces stderr to the operator.
+//!
+//! When/if the orchestrator is bundled into the published `baro-ai` npm
+//! package, this module will look for a precompiled `dist/cli.mjs`
+//! before falling back to the dev tsx path.
+
+use std::path::{Path, PathBuf};
+
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::mpsc;
+
+use crate::events::BaroEvent;
+
+pub struct OrchestratorConfig {
+    pub prd_path: PathBuf,
+    pub cwd: PathBuf,
+    pub parallel: u32,
+    pub timeout_secs: u64,
+    pub override_model: Option<String>,
+    pub default_model: Option<String>,
+    /// If true, the orchestrator will skip the git lifecycle (branch/push).
+    pub skip_git: bool,
+    /// Optional path for the audit JSONL log.
+    pub audit_log: Option<PathBuf>,
+}
+
+/// Spawn the orchestrator subprocess and return a channel that receives
+/// the BaroEvents it emits. Errors during spawn become a single
+/// `StoryError` event so the TUI surfaces them.
+pub fn spawn_orchestrator(
+    cfg: OrchestratorConfig,
+    tx: mpsc::Sender<BaroEvent>,
+) {
+    tokio::spawn(async move {
+        if let Err(err) = run(cfg, &tx).await {
+            let _ = tx
+                .send(BaroEvent::StoryError {
+                    id: "_orchestrator".to_string(),
+                    error: err,
+                    attempt: 1,
+                    max_retries: 1,
+                })
+                .await;
+        }
+    });
+}
+
+async fn run(
+    cfg: OrchestratorConfig,
+    tx: &mpsc::Sender<BaroEvent>,
+) -> Result<(), String> {
+    let entry = locate_entry(&cfg.cwd)?;
+    let mut cmd = build_command(&entry, &cfg);
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.stdin(std::process::Stdio::null());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn orchestrator: {}", e))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "orchestrator stdout missing".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "orchestrator stderr missing".to_string())?;
+
+    // Drain stdout: each line is a BaroEvent JSON.
+    let stdout_tx = tx.clone();
+    let stdout_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<BaroEvent>(trimmed) {
+                Ok(ev) => {
+                    if stdout_tx.send(ev).await.is_err() {
+                        break;
+                    }
+                }
+                Err(_) => {
+                    // Forward unrecognized output as a story log under
+                    // `_orchestrator`. Older TUIs are forward-compat.
+                    let _ = stdout_tx
+                        .send(BaroEvent::StoryLog {
+                            id: "_orchestrator".to_string(),
+                            line: format!("[parse-skip] {}", trimmed),
+                        })
+                        .await;
+                }
+            }
+        }
+    });
+
+    // Drain stderr: emit each line as a StoryLog under `_orchestrator`
+    // so the user can see what the subprocess is doing.
+    let stderr_tx = tx.clone();
+    let stderr_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let _ = stderr_tx
+                .send(BaroEvent::StoryLog {
+                    id: "_orchestrator".to_string(),
+                    line: trimmed.to_string(),
+                })
+                .await;
+        }
+    });
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("orchestrator wait failed: {}", e))?;
+
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
+
+    if !status.success() {
+        return Err(format!(
+            "orchestrator exited with code {}",
+            status.code().unwrap_or(-1)
+        ));
+    }
+    Ok(())
+}
+
+fn build_command(entry: &EntryPoint, cfg: &OrchestratorConfig) -> Command {
+    let mut cmd = match entry {
+        EntryPoint::Tsx { tsx, script } => {
+            let mut c = Command::new(tsx);
+            c.arg(script);
+            c
+        }
+        EntryPoint::NodeJs(js) => {
+            let mut c = Command::new("node");
+            c.arg(js);
+            c
+        }
+    };
+    cmd.arg("--prd").arg(&cfg.prd_path);
+    cmd.arg("--cwd").arg(&cfg.cwd);
+    cmd.arg("--parallel").arg(cfg.parallel.to_string());
+    cmd.arg("--timeout").arg(cfg.timeout_secs.to_string());
+    if let Some(m) = &cfg.override_model {
+        cmd.arg("--model").arg(m);
+    } else if let Some(m) = &cfg.default_model {
+        cmd.arg("--model").arg(m);
+    }
+    if cfg.skip_git {
+        cmd.arg("--no-git");
+    }
+    if let Some(p) = &cfg.audit_log {
+        cmd.arg("--audit-log").arg(p);
+    }
+    cmd
+}
+
+enum EntryPoint {
+    /// Dev path: `tsx scripts/cli.ts`.
+    Tsx { tsx: PathBuf, script: PathBuf },
+    /// Production path: bundled JS ship-with-npm-package.
+    NodeJs(PathBuf),
+}
+
+/// Find the orchestrator entry. Searches:
+///   1. Bundled production JS at `node_modules/baro-ai/dist/cli.mjs`
+///      under the user's cwd (when installed via `npm install baro-ai`)
+///   2. Dev tsx script in this repo at
+///      `<exe-dir-or-repo>/packages/baro-orchestrator/scripts/cli.ts`
+///      with tsx in `node_modules/.bin`.
+fn locate_entry(cwd: &Path) -> Result<EntryPoint, String> {
+    // (1) Production bundle
+    let bundled = cwd.join("node_modules/baro-ai/dist/cli.mjs");
+    if bundled.exists() {
+        return Ok(EntryPoint::NodeJs(bundled));
+    }
+
+    // (2) Dev tsx — find the baro repo root by walking up from this exe.
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("cannot read current exe: {}", e))?;
+    let mut search_root = exe.parent().map(|p| p.to_path_buf());
+    let mut found_repo: Option<PathBuf> = None;
+    while let Some(d) = search_root {
+        if d
+            .join("packages/baro-orchestrator/scripts/cli.ts")
+            .exists()
+        {
+            found_repo = Some(d);
+            break;
+        }
+        search_root = d.parent().map(|p| p.to_path_buf());
+    }
+
+    // Also try cwd-based discovery (when running from inside the baro repo).
+    let cwd_candidate = cwd.join("packages/baro-orchestrator/scripts/cli.ts");
+    let dev_repo = found_repo.or_else(|| {
+        if cwd_candidate.exists() {
+            Some(cwd.to_path_buf())
+        } else {
+            None
+        }
+    });
+
+    let dev_repo = dev_repo.ok_or_else(|| {
+        "could not locate baro-orchestrator package (neither bundled nor dev tsx)".to_string()
+    })?;
+    let tsx = dev_repo.join("node_modules/.bin/tsx");
+    let script = dev_repo.join("packages/baro-orchestrator/scripts/cli.ts");
+    if !tsx.exists() {
+        return Err(format!(
+            "tsx not found at {} — run `npm install` in the baro repo",
+            tsx.display()
+        ));
+    }
+    Ok(EntryPoint::Tsx { tsx, script })
+}

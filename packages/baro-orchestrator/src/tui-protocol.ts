@@ -19,10 +19,15 @@ import { createInterface } from "readline"
 
 // ─── Shared shapes ──────────────────────────────────────────────────
 
+// Field names use snake_case to match the Rust BaroEvent serde shape
+// (crates/baro-tui/src/events.rs) — JSON keys cross the language boundary
+// verbatim. Internal TS code that builds these objects translates from
+// camelCase as needed.
+
 export interface StoryInfo {
     id: string
     title: string
-    dependsOn?: string[]
+    depends_on?: string[]
 }
 
 export interface DagNodeInfo {
@@ -30,11 +35,11 @@ export interface DagNodeInfo {
 }
 
 export interface DoneStats {
-    storiesCompleted: number
-    storiesSkipped: number
-    totalCommits: number
-    filesCreated: number
-    filesModified: number
+    stories_completed: number
+    stories_skipped: number
+    total_commits: number
+    files_created: number
+    files_modified: number
 }
 
 // ─── Outbound: orchestrator → TUI ───────────────────────────────────
@@ -70,21 +75,6 @@ export type BaroEvent =
           id: string
           input_tokens: number
           output_tokens: number
-      }
-    | {
-          // New event: granular agent state, ignored by older TUIs.
-          type: "agent_state"
-          id: string
-          phase: string
-          detail: string | null
-      }
-    | {
-          // New event: conductor lifecycle (level transitions etc).
-          type: "conductor_state"
-          phase: string
-          detail: string | null
-          current_level: number | null
-          total_levels: number | null
       }
 
 /**

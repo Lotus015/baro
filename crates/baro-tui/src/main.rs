@@ -8,6 +8,7 @@ mod events;
 mod executor;
 mod git;
 mod notification;
+mod orchestrator_client;
 mod screens;
 mod theme;
 mod ui;
@@ -897,15 +898,16 @@ fn spawn_refiner(app: &App, feedback: &str, cwd: &Path, tx: mpsc::Sender<AppEven
 }
 
 fn spawn_executor(
-    prd: executor::PrdFile,
+    _prd: executor::PrdFile,
     cwd: PathBuf,
     tx: mpsc::Sender<AppEvent>,
     config: executor::ExecutorConfig,
 ) {
-    // Create a channel bridge: executor sends BaroEvent, we wrap them as AppEvent::Baro
+    // The orchestrator (TS, Mozaik-based) replaces the in-process Rust
+    // executor. Bridge BaroEvent → AppEvent::Baro the same way the old
+    // executor did so app/screens stay untouched.
     let (exec_tx, mut exec_rx) = mpsc::channel::<BaroEvent>(256);
 
-    // Forward BaroEvents to AppEvents
     let tx_fwd = tx.clone();
     tokio::spawn(async move {
         while let Some(ev) = exec_rx.recv().await {
@@ -915,10 +917,23 @@ fn spawn_executor(
         }
     });
 
-    // Run executor
-    tokio::spawn(async move {
-        executor::run_executor(prd, cwd, exec_tx, config).await;
-    });
+    let default_model = if config.model_routing {
+        Some("sonnet".to_string())
+    } else {
+        Some("opus".to_string())
+    };
+
+    let orch_cfg = orchestrator_client::OrchestratorConfig {
+        prd_path: cwd.join("prd.json"),
+        cwd,
+        parallel: config.parallel,
+        timeout_secs: config.timeout_secs,
+        override_model: config.override_model,
+        default_model,
+        skip_git: false,
+        audit_log: None,
+    };
+    orchestrator_client::spawn_orchestrator(orch_cfg, exec_tx);
 }
 
 async fn run_claude_planner(goal: &str, cwd: &Path, model: Option<&str>, context: Option<&str>) -> Result<(Vec<ReviewStory>, String, String, String), Box<dyn std::error::Error + Send + Sync>> {

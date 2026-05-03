@@ -174,7 +174,7 @@ export async function orchestrate(
             stories: prd.userStories.map((s) => ({
                 id: s.id,
                 title: s.title,
-                dependsOn: s.dependsOn,
+                depends_on: s.dependsOn,
             })),
         })
     }
@@ -194,11 +194,11 @@ export async function orchestrate(
             type: "done",
             total_time_secs: summary.totalDurationSecs,
             stats: {
-                storiesCompleted: summary.completedStories.length,
-                storiesSkipped: 0,
-                totalCommits: 0,
-                filesCreated,
-                filesModified,
+                stories_completed: summary.completedStories.length,
+                stories_skipped: 0,
+                total_commits: 0,
+                files_created: filesCreated,
+                files_modified: filesModified,
             },
         })
     }
@@ -267,13 +267,22 @@ class BaroEventForwarder extends Participant {
     }
 
     private handleConductorState(item: ConductorStateItem): void {
-        emit({
-            type: "conductor_state",
-            phase: item.phase,
-            detail: item.detail ?? null,
-            current_level: item.currentLevel ?? null,
-            total_levels: item.totalLevels ?? null,
-        })
+        // Mirror conductor lifecycle as a `progress` event the existing
+        // Rust TUI understands — it doesn't yet know `conductor_state`.
+        if (
+            item.phase === "running_level" &&
+            item.currentLevel != null &&
+            item.totalLevels != null
+        ) {
+            emit({
+                type: "progress",
+                completed: item.currentLevel - 1,
+                total: item.totalLevels,
+                percentage: Math.round(
+                    ((item.currentLevel - 1) / Math.max(1, item.totalLevels)) * 100,
+                ),
+            })
+        }
     }
 
     private handleStoryResult(item: StoryResultItem): void {
@@ -319,12 +328,6 @@ class BaroEventForwarder extends Participant {
     }
 
     private handleAgentState(item: AgentStateItem): void {
-        emit({
-            type: "agent_state",
-            id: item.agentId,
-            phase: item.phase,
-            detail: item.detail ?? null,
-        })
         if (item.phase === "running" && !this.startedStories.has(item.agentId)) {
             this.startedStories.add(item.agentId)
             emit({ type: "story_start", id: item.agentId, title: item.agentId })
