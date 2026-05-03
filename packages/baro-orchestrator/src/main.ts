@@ -111,4 +111,5 @@ export {
 export {
     KnowledgeItem,
     CoordinationItem,
+    CritiqueItem,
 } from "./types.js"
