@@ -6,9 +6,7 @@
  * stream-json --verbose`. Each line in is a JSON event Claude consumes,
  * each line out is a JSON event Claude emits. We map outbound events
  * through the stream-json mapper into typed Mozaik ContextItems and
- * deliver them to the environment. Inbound, we listen for
- * AgentTargetedMessageItem-s addressed to this agent and forward them as
- * `user` events on Claude's stdin.
+ * deliver them to the environment.
  *
  * Library-grade: knows nothing about baro, PRD, or stories. Only knows
  * about agent IDs, working directories, and Claude.
@@ -22,7 +20,6 @@ import { mapClaudeEvent } from "../stream-json-mapper.js"
 import {
     AgentPhase,
     AgentStateItem,
-    AgentTargetedMessageItem,
     ClaudeResultItem,
     ClaudeSystemItem,
 } from "../types.js"
@@ -206,13 +203,9 @@ export class ClaudeCliParticipant extends Participant {
         this.proc?.kill(signal)
     }
 
-    async onContextItem(source: Participant, item: ContextItem): Promise<void> {
-        if (source === this) return
-        if (item instanceof AgentTargetedMessageItem) {
-            if (item.recipientId !== this.agentId) return
-            if (!this.proc?.stdin) return
-            this.sendUserMessage(item.text)
-        }
+    async onContextItem(_source: Participant, _item: ContextItem): Promise<void> {
+        // AgentTargetedMessageItem forwarding is handled exclusively by
+        // StoryAgent.onContextItem to avoid double-delivery.
     }
 
     private buildArgs(): string[] {
