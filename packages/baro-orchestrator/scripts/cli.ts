@@ -37,6 +37,9 @@ interface CliArgs {
     criticModel?: string
     noLibrarian: boolean
     noSentry: boolean
+    withSurgeon: boolean
+    surgeonUseLlm: boolean
+    surgeonModel?: string
     help: boolean
 }
 
@@ -51,6 +54,8 @@ function parseArgs(argv: string[]): CliArgs {
         withCritic: false,
         noLibrarian: false,
         noSentry: false,
+        withSurgeon: false,
+        surgeonUseLlm: false,
         help: false,
     }
     for (let i = 0; i < argv.length; i++) {
@@ -96,6 +101,15 @@ function parseArgs(argv: string[]): CliArgs {
             case "--no-sentry":
                 args.noSentry = true
                 break
+            case "--with-surgeon":
+                args.withSurgeon = true
+                break
+            case "--surgeon-use-llm":
+                args.surgeonUseLlm = true
+                break
+            case "--surgeon-model":
+                args.surgeonModel = required(argv, ++i, "--surgeon-model")
+                break
             default:
                 process.stderr.write(`[cli] unknown flag: ${a}\n`)
                 process.exit(2)
@@ -134,6 +148,9 @@ function printHelp(): void {
             "  --critic-model <name> Model for Critic (default: haiku)",
             "  --no-librarian        Disable Librarian (cross-agent memory)",
             "  --no-sentry           Disable Sentry (file conflict detector)",
+            "  --with-surgeon        Enable Surgeon (adaptive DAG mutation)",
+            "  --surgeon-use-llm     Use LLM evaluation in Surgeon (default: deterministic)",
+            "  --surgeon-model <name> Model for Surgeon LLM (default: opus)",
             "  -h, --help            Show this message",
             "",
         ].join("\n"),
@@ -168,6 +185,9 @@ async function main(): Promise<void> {
         criticModel: args.criticModel,
         withLibrarian: args.noLibrarian ? false : undefined,
         withSentry: args.noSentry ? false : undefined,
+        withSurgeon: args.withSurgeon,
+        surgeonUseLlm: args.surgeonUseLlm,
+        surgeonModel: args.surgeonModel,
     }
 
     process.stderr.write(

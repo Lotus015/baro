@@ -143,12 +143,21 @@ fn story_list_item(
         None
     };
 
+    // Truncate title with an ellipsis if it would exceed a reasonable
+    // budget for the 35%-width Stories column. The fixed prefix
+    // ("   {icon} {id}: ") is ~7-8 chars, suffixes (duration + retry +
+    // push indicator) can add ~15 more, so 32 chars for the title keeps
+    // the line below ~55 chars total — fits a 35% column on terminals
+    // ≥ 160 cols and degrades gracefully (List truncates, scrollbar
+    // works) on narrower ones.
+    let title = truncate_for_panel(&story.title, 32);
+
     let mut spans = vec![
         Span::raw("   "),
         Span::styled(
             format!(
                 "{} {}: {}{}{}",
-                icon, story.id, story.title, duration, retry_info
+                icon, story.id, title, duration, retry_info
             ),
             style,
         ),
@@ -158,6 +167,18 @@ fn story_list_item(
     }
 
     ListItem::new(Line::from(spans))
+}
+
+/// Truncate a string to `max` *characters* (not bytes), appending an
+/// ellipsis if it was shortened. Operates on `chars()` so multi-byte
+/// codepoints don't get cut in half.
+fn truncate_for_panel(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string()
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 fn render_logs(f: &mut Frame, app: &App, area: Rect) {

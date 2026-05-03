@@ -67,6 +67,9 @@ pub struct ExecutorConfig {
     pub critic_model: Option<String>,
     pub with_librarian: bool,
     pub with_sentry: bool,
+    pub with_surgeon: bool,
+    pub surgeon_use_llm: bool,
+    pub surgeon_model: Option<String>,
 }
 
 // ─── Helpers used by main.rs ────────────────────────────────────────

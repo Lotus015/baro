@@ -145,6 +145,23 @@ struct Cli {
     /// Disable the Sentry (file-touch conflict detector). Default: ON.
     #[arg(long)]
     no_sentry: bool,
+
+    /// Enable the Surgeon (Phase 4): observes terminal story failures
+    /// and emits ReplanItem-s the Conductor applies at the next level
+    /// boundary. Default: OFF.
+    #[arg(long)]
+    with_surgeon: bool,
+
+    /// Use Claude (`claude --model …`) for Surgeon evaluation.
+    /// Default: deterministic (skip-only). Setting this on costs tokens
+    /// but lets Surgeon propose richer replans.
+    #[arg(long)]
+    surgeon_use_llm: bool,
+
+    /// Model for the Surgeon LLM (only used with --surgeon-use-llm).
+    /// Default: "opus".
+    #[arg(long)]
+    surgeon_model: Option<String>,
 }
 
 enum AppEvent {
@@ -349,6 +366,15 @@ async fn run_app(
     }
     if cli.no_sentry {
         app.with_sentry = false;
+    }
+    if cli.with_surgeon {
+        app.with_surgeon = true;
+    }
+    if cli.surgeon_use_llm {
+        app.surgeon_use_llm = true;
+    }
+    if let Some(ref m) = cli.surgeon_model {
+        app.surgeon_model = Some(m.clone());
     }
 
     let (tx, mut rx) = mpsc::channel::<AppEvent>(256);
@@ -658,6 +684,9 @@ async fn run_app(
                                         let cm = app.critic_model.clone();
                                         let wl = app.with_librarian;
                                         let ws = app.with_sentry;
+                                        let wsg = app.with_surgeon;
+                                        let sul = app.surgeon_use_llm;
+                                        let sm = app.surgeon_model.clone();
                                         let err_tx = tx.clone();
                                         tokio::spawn(async move {
                                             if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
@@ -681,7 +710,7 @@ async fn run_app(
                                                     return;
                                                 }
                                             }
-                                            spawn_executor(prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws });
+                                            spawn_executor(prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws, with_surgeon: wsg, surgeon_use_llm: sul, surgeon_model: sm });
                                         });
                                     }
                                     Err(e) => {
@@ -716,6 +745,9 @@ async fn run_app(
                                     let cm = app.critic_model.clone();
                                     let wl = app.with_librarian;
                                     let ws = app.with_sentry;
+                                    let wsg = app.with_surgeon;
+                                    let sul = app.surgeon_use_llm;
+                                    let sm = app.surgeon_model.clone();
                                     let err_tx = tx.clone();
                                     tokio::spawn(async move {
                                         if let Err(e) = git::create_or_checkout_branch(&branch_cwd, &branch_name_clone).await {
@@ -739,7 +771,7 @@ async fn run_app(
                                                 return;
                                             }
                                         }
-                                        spawn_executor(exec_prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws });
+                                        spawn_executor(exec_prd, exec_cwd, branch_tx, executor::ExecutorConfig { parallel: pl, timeout_secs: ts, model_routing: mr, override_model: om, with_critic: wc, critic_model: cm, with_librarian: wl, with_sentry: ws, with_surgeon: wsg, surgeon_use_llm: sul, surgeon_model: sm });
                                     });
                                 }
                             }
@@ -970,6 +1002,9 @@ fn spawn_executor(
         critic_model: config.critic_model,
         with_librarian: config.with_librarian,
         with_sentry: config.with_sentry,
+        with_surgeon: config.with_surgeon,
+        surgeon_use_llm: config.surgeon_use_llm,
+        surgeon_model: config.surgeon_model,
     };
     orchestrator_client::spawn_orchestrator(orch_cfg, exec_tx);
 }

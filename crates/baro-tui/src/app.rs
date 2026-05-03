@@ -191,11 +191,14 @@ pub struct App {
     pub model_routing: bool,
     pub override_model: Option<String>,
 
-    // Phase 2 / 3 observers (Mozaik orchestrator participants)
+    // Phase 2 / 3 / 4 observers (Mozaik orchestrator participants)
     pub with_critic: bool,
     pub critic_model: Option<String>,
     pub with_librarian: bool,
     pub with_sentry: bool,
+    pub with_surgeon: bool,
+    pub surgeon_use_llm: bool,
+    pub surgeon_model: Option<String>,
 
     // Context building
     pub skip_context: bool,
@@ -270,6 +273,9 @@ impl App {
             critic_model: None,
             with_librarian: true,
             with_sentry: true,
+            with_surgeon: false,
+            surgeon_use_llm: false,
+            surgeon_model: None,
             skip_context: false,
             dry_run: false,
             token_usage: HashMap::new(),

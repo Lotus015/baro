@@ -36,6 +36,12 @@ pub struct OrchestratorConfig {
     pub with_librarian: bool,
     /// Disable Sentry (Phase 2 file conflict detector). Default: false (Sentry on).
     pub with_sentry: bool,
+    /// Enable Surgeon (Phase 4 adaptive DAG mutation). Default: false.
+    pub with_surgeon: bool,
+    /// Use Claude CLI for Surgeon evaluation. Default: false (deterministic).
+    pub surgeon_use_llm: bool,
+    /// Model for Surgeon LLM (default "opus" inside the orchestrator).
+    pub surgeon_model: Option<String>,
 }
 
 /// Spawn the orchestrator subprocess and return a channel that receives
@@ -186,6 +192,15 @@ fn build_command(entry: &EntryPoint, cfg: &OrchestratorConfig) -> Command {
     }
     if !cfg.with_sentry {
         cmd.arg("--no-sentry");
+    }
+    if cfg.with_surgeon {
+        cmd.arg("--with-surgeon");
+    }
+    if cfg.surgeon_use_llm {
+        cmd.arg("--surgeon-use-llm");
+    }
+    if let Some(m) = &cfg.surgeon_model {
+        cmd.arg("--surgeon-model").arg(m);
     }
     cmd
 }
