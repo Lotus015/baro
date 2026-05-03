@@ -1,0 +1,305 @@
+/**
+ * ClaudeCliParticipant — wraps a long-lived Claude Code CLI process as a
+ * first-class Mozaik Participant.
+ *
+ * Spawned with `--print --input-format stream-json --output-format
+ * stream-json --verbose`. Each line in is a JSON event Claude consumes,
+ * each line out is a JSON event Claude emits. We map outbound events
+ * through the stream-json mapper into typed Mozaik ContextItems and
+ * deliver them to the environment. Inbound, we listen for
+ * AgentTargetedMessageItem-s addressed to this agent and forward them as
+ * `user` events on Claude's stdin.
+ *
+ * Library-grade: knows nothing about baro, PRD, or stories. Only knows
+ * about agent IDs, working directories, and Claude.
+ */
+
+import { ChildProcess, spawn } from "child_process"
+
+import { AgenticEnvironment, ContextItem, Participant } from "@mozaik-ai/core"
+
+import { mapClaudeEvent } from "../stream-json-mapper.js"
+import {
+    AgentPhase,
+    AgentStateItem,
+    AgentTargetedMessageItem,
+    ClaudeResultItem,
+    ClaudeSystemItem,
+} from "../types.js"
+
+export interface ClaudeCliParticipantOptions {
+    /** Working directory for the Claude process. Required. */
+    cwd: string
+    /** Model to use (e.g. "sonnet", "opus", "haiku"). Optional. */
+    model?: string
+    /**
+     * If true, pass `--include-partial-messages` so Claude emits
+     * `stream_event` chunks for each token delta. Adds ~80% bus volume.
+     * Default: false.
+     */
+    includePartialMessages?: boolean
+    /**
+     * If true, pass `--replay-user-messages` so Claude echoes received
+     * stdin user events back as `user` events on stdout. Useful for
+     * confirming bus → Claude routing. Default: true.
+     */
+    replayUserMessages?: boolean
+    /**
+     * Permission mode passed to Claude. Default: "bypassPermissions".
+     * Production multi-agent runs may want stricter modes.
+     */
+    permissionMode?: "default" | "acceptEdits" | "auto" | "bypassPermissions" | "dontAsk" | "plan"
+    /** Extra CLI arguments appended after the standard set. */
+    extraArgs?: string[]
+    /** Path to the `claude` binary. Default: "claude" (resolved via PATH). */
+    claudeBin?: string
+    /**
+     * If provided, pass `--resume <sessionId>` so Claude continues an
+     * existing session instead of starting fresh. Required for
+     * multi-turn agents that survive across multiple infer() calls.
+     */
+    resumeSessionId?: string
+}
+
+export interface ClaudeRunSummary {
+    sessionId: string | null
+    exitCode: number | null
+    error: Error | null
+    lastResult: ClaudeResultItem | null
+}
+
+export class ClaudeCliParticipant extends Participant {
+    private readonly options: Required<
+        Pick<
+            ClaudeCliParticipantOptions,
+            "includePartialMessages" | "replayUserMessages" | "permissionMode" | "claudeBin"
+        >
+    > &
+        ClaudeCliParticipantOptions
+
+    private proc: ChildProcess | null = null
+    private buffer = ""
+    private envRef: AgenticEnvironment | null = null
+    private currentPhase: AgentPhase = "idle"
+    private sessionId: string | null = null
+    private lastResult: ClaudeResultItem | null = null
+    private exitCode: number | null = null
+    private spawnError: Error | null = null
+    private resolveDone!: (summary: ClaudeRunSummary) => void
+    private resolveReady!: () => void
+    private rejectReady!: (e: Error) => void
+
+    /** Resolves once Claude emits its first `system:init` event. */
+    public readonly ready: Promise<void>
+    /** Resolves once the Claude process exits (regardless of success). */
+    public readonly done: Promise<ClaudeRunSummary>
+
+    constructor(
+        public readonly agentId: string,
+        opts: ClaudeCliParticipantOptions,
+    ) {
+        super()
+        this.options = {
+            includePartialMessages: false,
+            replayUserMessages: true,
+            permissionMode: "bypassPermissions",
+            claudeBin: "claude",
+            ...opts,
+        }
+        this.ready = new Promise<void>((res, rej) => {
+            this.resolveReady = res
+            this.rejectReady = rej
+        })
+        this.done = new Promise<ClaudeRunSummary>((res) => {
+            this.resolveDone = res
+        })
+    }
+
+    getSessionId(): string | null {
+        return this.sessionId
+    }
+
+    getPhase(): AgentPhase {
+        return this.currentPhase
+    }
+
+    /**
+     * Spawn the Claude process and start streaming its events into the
+     * environment. Idempotent: subsequent calls are a no-op.
+     */
+    start(environment: AgenticEnvironment): void {
+        if (this.proc) return
+        this.envRef = environment
+
+        const args = this.buildArgs()
+        let proc: ChildProcess
+        try {
+            proc = spawn(this.options.claudeBin, args, {
+                cwd: this.options.cwd,
+                stdio: ["pipe", "pipe", "pipe"],
+            })
+        } catch (e) {
+            this.spawnError = e instanceof Error ? e : new Error(String(e))
+            this.transition("failed", this.spawnError.message)
+            this.rejectReady(this.spawnError)
+            this.resolveDone({
+                sessionId: null,
+                exitCode: null,
+                error: this.spawnError,
+                lastResult: null,
+            })
+            return
+        }
+
+        this.proc = proc
+        this.transition("starting")
+
+        proc.stdout!.setEncoding("utf8")
+        proc.stderr!.setEncoding("utf8")
+        proc.stdout!.on("data", (chunk: string) => this.handleStdout(chunk))
+        proc.stderr!.on("data", (chunk: string) => this.handleStderr(chunk))
+        proc.on("error", (err) => {
+            this.spawnError = err
+            this.rejectReady(err)
+        })
+        proc.on("exit", (code) => {
+            this.exitCode = code
+            const finalPhase: AgentPhase =
+                this.spawnError != null || (code != null && code !== 0)
+                    ? "failed"
+                    : "done"
+            this.transition(finalPhase, code != null ? `exit code ${code}` : "no exit code")
+            this.resolveDone({
+                sessionId: this.sessionId,
+                exitCode: code,
+                error: this.spawnError,
+                lastResult: this.lastResult,
+            })
+        })
+    }
+
+    /**
+     * Send a user message into the Claude process. Used by both bus
+     * routing (via onContextItem) and direct callers (the orchestrator
+     * may want to inject the initial prompt directly to avoid a circular
+     * AgentTargetedMessageItem dance).
+     */
+    sendUserMessage(text: string): void {
+        if (!this.proc?.stdin) {
+            throw new Error(`[${this.agentId}] proc not started`)
+        }
+        const event = {
+            type: "user",
+            message: { role: "user", content: text },
+        }
+        this.proc.stdin.write(JSON.stringify(event) + "\n")
+    }
+
+    /** Close stdin so Claude knows no more input is coming. */
+    closeStdin(): void {
+        this.proc?.stdin?.end()
+    }
+
+    /** Kill the Claude process. Resolves once exit fires. */
+    abort(signal: NodeJS.Signals = "SIGTERM"): void {
+        this.transition("aborted")
+        this.proc?.kill(signal)
+    }
+
+    async onContextItem(source: Participant, item: ContextItem): Promise<void> {
+        if (source === this) return
+        if (item instanceof AgentTargetedMessageItem) {
+            if (item.recipientId !== this.agentId) return
+            if (!this.proc?.stdin) return
+            this.sendUserMessage(item.text)
+        }
+    }
+
+    private buildArgs(): string[] {
+        const args = [
+            "--print",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--permission-mode",
+            this.options.permissionMode,
+        ]
+        if (this.options.includePartialMessages) {
+            args.push("--include-partial-messages")
+        }
+        if (this.options.replayUserMessages) {
+            args.push("--replay-user-messages")
+        }
+        if (this.options.model) {
+            args.push("--model", this.options.model)
+        }
+        if (this.options.resumeSessionId) {
+            args.push("--resume", this.options.resumeSessionId)
+        }
+        if (this.options.extraArgs && this.options.extraArgs.length > 0) {
+            args.push(...this.options.extraArgs)
+        }
+        return args
+    }
+
+    private handleStdout(chunk: string): void {
+        this.buffer += chunk
+        let nl: number
+        while ((nl = this.buffer.indexOf("\n")) >= 0) {
+            const line = this.buffer.slice(0, nl).trim()
+            this.buffer = this.buffer.slice(nl + 1)
+            if (!line) continue
+            this.processLine(line)
+        }
+    }
+
+    private handleStderr(chunk: string): void {
+        const trimmed = chunk.trimEnd()
+        if (!trimmed) return
+        // Stderr is informational only; surface via state detail rather
+        // than as an error so observers can decide what to do with it.
+        process.stderr.write(`[claude:${this.agentId}/stderr] ${trimmed}\n`)
+    }
+
+    private processLine(line: string): void {
+        let parsed: Record<string, any>
+        try {
+            parsed = JSON.parse(line)
+        } catch {
+            process.stderr.write(
+                `[claude:${this.agentId}] non-JSON stdout: ${line.slice(0, 200)}\n`,
+            )
+            return
+        }
+
+        const { items, sessionId } = mapClaudeEvent(this.agentId, parsed)
+        if (sessionId && !this.sessionId) {
+            this.sessionId = sessionId
+        }
+
+        for (const item of items) {
+            if (item instanceof ClaudeSystemItem && item.subtype === "init") {
+                this.transition("running", "claude init received")
+                this.resolveReady()
+            }
+            if (item instanceof ClaudeResultItem) {
+                this.lastResult = item
+                this.transition(item.isError ? "failed" : "done", `result:${item.subtype}`)
+            }
+            this.envRef?.deliverContextItem(this, item)
+        }
+    }
+
+    private transition(next: AgentPhase, detail?: string): void {
+        if (next === this.currentPhase) return
+        this.currentPhase = next
+        if (this.envRef) {
+            this.envRef.deliverContextItem(
+                this,
+                new AgentStateItem(this.agentId, next, detail),
+            )
+        }
+    }
+}
