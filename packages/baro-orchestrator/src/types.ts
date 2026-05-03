@@ -50,6 +50,57 @@ export class KnowledgeItem extends ContextItem {
 }
 
 /**
+ * A request to mutate the running DAG: add new stories, remove
+ * existing-but-not-yet-passing stories, and/or rewire dependencies.
+ * Surgeon emits these when reality disagrees with the original plan
+ * (repeated failures, scope creep, missing prerequisites, …).
+ *
+ * Conductor buffers ReplanItem-s during level execution and applies
+ * them at the next level boundary. Library-grade: doesn't import PRD
+ * types — added stories are described by a structural shape, the
+ * consumer (Conductor) is the one that lifts them into PrdStory.
+ */
+export interface ReplanStoryAdd {
+    id: string
+    priority: number
+    title: string
+    description: string
+    dependsOn: readonly string[]
+    retries?: number
+    acceptance?: readonly string[]
+    tests?: readonly string[]
+    model?: string
+}
+
+export class ReplanItem extends ContextItem {
+    readonly type = "replan"
+
+    constructor(
+        public readonly source: string,
+        public readonly reason: string,
+        public readonly addedStories: readonly ReplanStoryAdd[] = [],
+        public readonly removedStoryIds: readonly string[] = [],
+        public readonly modifiedDeps: ReadonlyMap<
+            string,
+            readonly string[]
+        > = new Map(),
+    ) {
+        super()
+    }
+
+    toJSON(): unknown {
+        return {
+            type: this.type,
+            source: this.source,
+            reason: this.reason,
+            addedStories: this.addedStories,
+            removedStoryIds: this.removedStoryIds,
+            modifiedDeps: Array.from(this.modifiedDeps.entries()),
+        }
+    }
+}
+
+/**
  * Inter-agent coordination directive. Sentry emits these to ask one
  * agent to wait, abort, or merge before stepping on another agent's
  * pending work.

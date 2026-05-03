@@ -39,6 +39,7 @@ import { Librarian } from "./participants/librarian.js"
 import { Operator } from "./participants/operator.js"
 import { Sentry } from "./participants/sentry.js"
 import { StoryResultItem, type StoryAgent } from "./participants/story-agent.js"
+import { Surgeon, type PrdSnapshot } from "./participants/surgeon.js"
 import { PrdFile, loadPrd } from "./prd.js"
 import {
     AgentStateItem,
@@ -96,6 +97,21 @@ export interface OrchestrateConfig {
      * or a fully qualified ID.
      */
     criticModel?: string
+    /**
+     * Whether to wire the Surgeon (Phase 4 adaptive DAG mutation).
+     * When on, terminal story failures trigger ReplanItem-s that
+     * Conductor applies at the next level boundary. Default: false.
+     */
+    withSurgeon?: boolean
+    /**
+     * Use Claude CLI (claude --model …) for Surgeon evaluation.
+     * Default: false (deterministic skip-only strategy). Setting true
+     * costs tokens but lets Surgeon propose richer replans (split,
+     * insert prerequisite, rewire deps).
+     */
+    surgeonUseLlm?: boolean
+    /** Model for the Surgeon LLM. Default: "opus". */
+    surgeonModel?: string
     /** Hooks for receiving Operator commands externally (Rust TUI). */
     operatorHooks?: {
         onAbort?: (storyId: string) => void
@@ -150,6 +166,32 @@ export async function orchestrate(
     const sentry = useSentry ? new Sentry() : null
     if (librarian) librarian.join(env)
     if (sentry) sentry.join(env)
+
+    // Phase-4 observer — Surgeon (adaptive DAG mutation). Opt-in.
+    // Joins early so it sees StoryResultItem-s from the moment the
+    // Conductor starts running.
+    let surgeon: Surgeon | null = null
+    if (config.withSurgeon) {
+        surgeon = new Surgeon({
+            snapshot: (): PrdSnapshot => {
+                const current = loadPrd(config.prdPath)
+                return {
+                    project: current.project,
+                    description: current.description,
+                    stories: current.userStories.map((s) => ({
+                        id: s.id,
+                        title: s.title,
+                        description: s.description,
+                        dependsOn: s.dependsOn,
+                        passes: s.passes,
+                    })),
+                }
+            },
+            useLlm: config.surgeonUseLlm ?? false,
+            model: config.surgeonModel ?? "opus",
+        })
+        surgeon.join(env)
+    }
 
     // Phase-3 observer — Critic (live acceptance-criteria evaluator).
     // Opt-in (default OFF). Spawns `claude --model haiku` subprocesses
@@ -252,9 +294,10 @@ export async function orchestrate(
 
     const summary = await conductor.run(env)
 
-    // Drain in-flight Critic evaluations so the audit log and any
-    // CritiqueItem-emitted side effects land before this function returns.
+    // Drain in-flight async observers so all side effects (CritiqueItem,
+    // ReplanItem) land in the audit log before this function returns.
     if (critic) await critic.idle()
+    if (surgeon) await surgeon.idle()
 
     let filesCreated = 0
     let filesModified = 0

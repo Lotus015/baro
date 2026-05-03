@@ -1,0 +1,295 @@
+/**
+ * Surgeon — adaptive DAG mutation participant (Phase 4).
+ *
+ * Observes terminal story failures (StoryResultItem with success=false
+ * after all retries exhausted) and emits ReplanItem-s that the
+ * Conductor applies at the next level boundary.
+ *
+ * Two evaluation strategies:
+ *
+ *   • `useLlm: false` (default) — deterministic. When a story fails
+ *     terminally, Surgeon emits a ReplanItem that REMOVES the failing
+ *     story so dependents can either run with one fewer prerequisite
+ *     or themselves be removed by cascade. This is graceful
+ *     degradation — pre-Phase-4 the entire level (and downstream)
+ *     would just abort.
+ *
+ *   • `useLlm: true` — calls `claude --model <model> --print` with a
+ *     compact view of the run state and asks for a structured
+ *     replan (add/remove/rewire stories). The model is given the
+ *     full failure reason and the surrounding PRD so it can propose
+ *     a different approach (e.g. split the failed story into two
+ *     smaller stories, or insert a missing prerequisite).
+ *
+ * Library-grade: doesn't import PRD types directly. The Surgeon
+ * receives PRD context as a generic `() => PrdSnapshot` callback so
+ * the Conductor stays the only PRD-aware piece of code.
+ */
+
+import { execFile } from "child_process"
+import { promisify } from "util"
+
+import { ContextItem, Participant } from "@mozaik-ai/core"
+
+import { ReplanItem, ReplanStoryAdd } from "../types.js"
+import { StoryResultItem } from "./story-agent.js"
+
+const execFileAsync = promisify(execFile)
+
+/**
+ * Lightweight read-only view of the PRD that Surgeon needs to reason.
+ * The Conductor (or the orchestrate() wiring) provides this snapshot;
+ * Surgeon doesn't import PrdFile/PrdStory itself.
+ */
+export interface PrdSnapshot {
+    project: string
+    description: string
+    stories: readonly {
+        id: string
+        title: string
+        description: string
+        dependsOn: readonly string[]
+        passes: boolean
+    }[]
+}
+
+export interface SurgeonOptions {
+    /** Returns a fresh snapshot of the current PRD. */
+    snapshot: () => PrdSnapshot
+    /** Use Claude CLI to evaluate replans. Default: false (deterministic). */
+    useLlm?: boolean
+    /** Model for LLM evaluations. Default: "opus". */
+    model?: string
+    /** Max replans this Surgeon will emit per run. Default: 3. */
+    maxReplans?: number
+    /** Path to the `claude` binary. Default: "claude". */
+    claudeBin?: string
+    /** Per-evaluation timeout in milliseconds. Default: 90_000. */
+    timeoutMs?: number
+}
+
+const SURGEON_SYSTEM_PROMPT = `\
+You are the Surgeon — an autonomous planner that adapts a software-project
+DAG when stories fail. Given:
+1. A snapshot of the current PRD (project, story list with dependencies +
+   pass/fail state).
+2. The id, title, description, and FAILURE REASON of the story that just
+   exhausted its retry budget.
+
+Decide ONE of:
+  (a) "skip"      — the failure isn't load-bearing; remove only this story.
+  (b) "split"     — replace the failing story with 2-3 smaller stories.
+  (c) "prereq"    — insert a NEW story that the failing one depends on,
+                    AND remove the failing one (it can be re-attempted
+                    later by re-introducing it manually).
+  (d) "abort"     — nothing useful can be salvaged; emit no replan.
+
+Respond ONLY with a JSON object — no prose, no markdown fences — in
+exactly this shape:
+
+{"action":"skip"|"split"|"prereq"|"abort",
+ "reason":"…",
+ "added":[ { "id":"S?","priority":N,"title":"…","description":"…",
+             "dependsOn":["…"], "acceptance":["…"] } ],
+ "removed":["S?"],
+ "modifiedDeps":[{"id":"S?","newDependsOn":["…"]}]}
+
+Rules:
+- Story ids you ADD must not collide with existing ids.
+- Story ids you REMOVE must currently exist and not yet have passes=true.
+- "modifiedDeps" rewires a story's dependsOn — use to repoint dependents
+  of a removed story to a replacement.
+- "abort" → empty added/removed/modifiedDeps arrays.
+- Output ONLY the JSON object, nothing else.`
+
+export class Surgeon extends Participant {
+    private readonly opts: Required<
+        Pick<
+            SurgeonOptions,
+            "useLlm" | "model" | "maxReplans" | "claudeBin" | "timeoutMs"
+        >
+    > &
+        SurgeonOptions
+
+    private replansEmitted = 0
+    private readonly pending = new Set<Promise<void>>()
+
+    constructor(opts: SurgeonOptions) {
+        super()
+        this.opts = {
+            useLlm: opts.useLlm ?? false,
+            model: opts.model ?? "opus",
+            maxReplans: opts.maxReplans ?? 3,
+            claudeBin: opts.claudeBin ?? "claude",
+            timeoutMs: opts.timeoutMs ?? 90_000,
+            snapshot: opts.snapshot,
+        }
+    }
+
+    /** Resolves once every in-flight LLM evaluation has completed. */
+    async idle(): Promise<void> {
+        await Promise.allSettled([...this.pending])
+    }
+
+    async onContextItem(_source: Participant, item: ContextItem): Promise<void> {
+        if (!(item instanceof StoryResultItem)) return
+        if (item.success) return
+        if (this.replansEmitted >= this.opts.maxReplans) return
+
+        const work = (async () => {
+            const replan = this.opts.useLlm
+                ? await this.evaluateWithLlm(item)
+                : this.evaluateDeterministic(item)
+            if (!replan) return
+            this.replansEmitted += 1
+            for (const env of this.getEnvironments()) {
+                env.deliverContextItem(this, replan)
+            }
+        })()
+
+        this.pending.add(work)
+        work.finally(() => this.pending.delete(work))
+        await work
+    }
+
+    /**
+     * Deterministic strategy: emit a "skip" — remove the failing story
+     * so its dependents either run unblocked (if they had multiple
+     * deps) or get cascade-removed by buildDag's cycle-detection
+     * skipping (if their only dep is now gone, they become unreachable).
+     */
+    private evaluateDeterministic(failure: StoryResultItem): ReplanItem {
+        return new ReplanItem(
+            "surgeon",
+            `deterministic skip: ${failure.storyId} exhausted ${failure.attempts} attempts (${failure.error ?? "no reason"})`,
+            [],
+            [failure.storyId],
+            new Map(),
+        )
+    }
+
+    /**
+     * LLM strategy: ask Claude (via CLI subprocess) to propose a replan
+     * grounded in the PRD snapshot + failure reason. Falls back to
+     * deterministic on parsing or subprocess error.
+     */
+    private async evaluateWithLlm(
+        failure: StoryResultItem,
+    ): Promise<ReplanItem | null> {
+        const snap = this.opts.snapshot()
+        const prompt = buildSurgeonPrompt(snap, failure)
+        try {
+            const { stdout } = await execFileAsync(
+                this.opts.claudeBin,
+                [
+                    "--print",
+                    "--output-format",
+                    "json",
+                    "--model",
+                    this.opts.model,
+                    "--permission-mode",
+                    "bypassPermissions",
+                    "--system-prompt",
+                    SURGEON_SYSTEM_PROMPT,
+                    "-p",
+                    prompt,
+                ],
+                {
+                    timeout: this.opts.timeoutMs,
+                    maxBuffer: 4 * 1024 * 1024,
+                },
+            )
+            const wrapper = JSON.parse(stdout) as { result?: string }
+            const verdictText =
+                typeof wrapper.result === "string" ? wrapper.result.trim() : ""
+            if (!verdictText) throw new Error("empty result")
+
+            const verdictJson = extractJsonObject(verdictText)
+            const parsed = JSON.parse(verdictJson) as {
+                action: string
+                reason?: string
+                added?: ReplanStoryAdd[]
+                removed?: string[]
+                modifiedDeps?: { id: string; newDependsOn: string[] }[]
+            }
+
+            if (parsed.action === "abort") return null
+
+            const modifiedDeps = new Map<string, readonly string[]>()
+            for (const m of parsed.modifiedDeps ?? []) {
+                if (typeof m.id === "string" && Array.isArray(m.newDependsOn)) {
+                    modifiedDeps.set(m.id, [...m.newDependsOn])
+                }
+            }
+            return new ReplanItem(
+                "surgeon",
+                `${parsed.action}: ${parsed.reason ?? ""}`,
+                parsed.added ?? [],
+                parsed.removed ?? [],
+                modifiedDeps,
+            )
+        } catch (err) {
+            // Fall back to deterministic on any LLM-side failure so the
+            // run still has a chance to recover.
+            const fallback = this.evaluateDeterministic(failure)
+            return new ReplanItem(
+                fallback.source,
+                `${fallback.reason} (llm fallback after error: ${(err as Error)?.message ?? String(err)})`,
+                fallback.addedStories,
+                fallback.removedStoryIds,
+                fallback.modifiedDeps,
+            )
+        }
+    }
+}
+
+function buildSurgeonPrompt(
+    snap: PrdSnapshot,
+    failure: StoryResultItem,
+): string {
+    const storyLines = snap.stories
+        .map(
+            (s) =>
+                `  - ${s.id} ${s.passes ? "[passed]" : "[pending]"} "${s.title}" deps=${JSON.stringify(s.dependsOn)}`,
+        )
+        .join("\n")
+    const failureStory = snap.stories.find((s) => s.id === failure.storyId)
+    return [
+        `# Project: ${snap.project}`,
+        `Description: ${snap.description}`,
+        "",
+        `# Current PRD`,
+        storyLines,
+        "",
+        `# Failure`,
+        `Story id: ${failure.storyId}`,
+        `Title: ${failureStory?.title ?? "(unknown)"}`,
+        `Description: ${failureStory?.description ?? "(unknown)"}`,
+        `Attempts: ${failure.attempts}`,
+        `Error: ${failure.error ?? "(no reason captured)"}`,
+        "",
+        `# Decide`,
+        `Output the replan JSON per the rules in your system prompt.`,
+    ].join("\n")
+}
+
+function extractJsonObject(text: string): string {
+    const trimmed = text.trim()
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed
+    const fenceMatch = trimmed.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/)
+    if (fenceMatch) return fenceMatch[1]!
+    const start = trimmed.indexOf("{")
+    if (start < 0) {
+        throw new Error(`no JSON object found in surgeon response`)
+    }
+    let depth = 0
+    for (let i = start; i < trimmed.length; i++) {
+        const ch = trimmed[i]
+        if (ch === "{") depth += 1
+        else if (ch === "}") {
+            depth -= 1
+            if (depth === 0) return trimmed.slice(start, i + 1)
+        }
+    }
+    throw new Error("unbalanced JSON object in surgeon response")
+}

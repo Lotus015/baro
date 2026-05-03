@@ -112,9 +112,17 @@ export {
     KnowledgeItem,
     CoordinationItem,
     CritiqueItem,
+    ReplanItem,
+    type ReplanStoryAdd,
 } from "./types.js"
 
 export {
     Critic,
     type CriticOptions,
 } from "./participants/critic.js"
+
+export {
+    Surgeon,
+    type SurgeonOptions,
+    type PrdSnapshot,
+} from "./participants/surgeon.js"

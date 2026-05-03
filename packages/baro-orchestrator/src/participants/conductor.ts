@@ -26,6 +26,7 @@ import {
     markStoryPassed,
     savePrd,
 } from "../prd.js"
+import { ReplanItem } from "../types.js"
 import { StoryAgent, StoryOutcome } from "./story-agent.js"
 
 export interface ConductorOptions {
@@ -120,6 +121,14 @@ export class Conductor extends Participant {
 
     private envRef: AgenticEnvironment | null = null
 
+    /**
+     * ReplanItem-s emitted while a level is in flight are buffered here
+     * and applied at the next level boundary. Mid-level mutation would
+     * leave running StoryAgents orphaned; level boundaries are the safe
+     * apply points.
+     */
+    private readonly pendingReplans: ReplanItem[] = []
+
     constructor(opts: ConductorOptions) {
         super()
         this.opts = {
@@ -130,9 +139,10 @@ export class Conductor extends Participant {
         }
     }
 
-    async onContextItem(): Promise<void> {
-        // Conductor pulls outcomes via direct await on StoryAgent.done;
-        // no bus reactions needed in this phase.
+    async onContextItem(_source: Participant, item: ContextItem): Promise<void> {
+        if (item instanceof ReplanItem) {
+            this.pendingReplans.push(item)
+        }
     }
 
     async run(environment: AgenticEnvironment): Promise<ConductorRunSummary> {
@@ -155,30 +165,32 @@ export class Conductor extends Participant {
             }
         }
 
-        const levels = buildDag(prd.userStories, { onlyIncomplete: true })
-        if (levels.length === 0) {
-            this.emit(new ConductorStateItem("done", "nothing to do"))
-            return {
-                completedStories: prd.userStories.filter((s) => s.passes).map((s) => s.id),
-                failedStories: [],
-                totalDurationSecs: 0,
-                totalAttempts: 0,
-            }
-        }
-
+        // Adaptive DAG: each iteration of the while-loop computes the
+        // remaining-incomplete DAG fresh from the PRD, runs the next
+        // level, then applies any ReplanItem-s buffered during that
+        // level. ReplanItem applications happen at level boundaries so
+        // running StoryAgents are never orphaned.
         const completed: string[] = []
         const failed: string[] = []
         const startedAt = Date.now()
         let totalAttempts = 0
+        let levelOrdinal = 0
+        let abortedReason: string | null = null
+        let appliedReplans = 0
 
-        for (let levelIdx = 0; levelIdx < levels.length; levelIdx++) {
-            const level = levels[levelIdx]
+        while (true) {
+            const levels = buildDag(prd.userStories, { onlyIncomplete: true })
+            if (levels.length === 0) break
+
+            const level = levels[0]
+            levelOrdinal += 1
+            const totalLevelsHint = levelOrdinal + levels.length - 1
             this.emit(
                 new ConductorStateItem(
                     "running_level",
                     undefined,
-                    levelIdx + 1,
-                    levels.length,
+                    levelOrdinal,
+                    totalLevelsHint,
                     level.storyIds,
                 ),
             )
@@ -198,8 +210,8 @@ export class Conductor extends Participant {
                                 new ConductorStateItem(
                                     "running_level",
                                     `onStoryPassed hook for ${outcome.storyId} failed: ${(e as Error)?.message ?? String(e)}`,
-                                    levelIdx + 1,
-                                    levels.length,
+                                    levelOrdinal,
+                                    totalLevelsHint,
                                 ),
                             )
                         }
@@ -213,23 +225,44 @@ export class Conductor extends Participant {
                 new ConductorStateItem(
                     "level_complete",
                     `passed ${outcomes.filter((o) => o.success).length}/${outcomes.length}`,
-                    levelIdx + 1,
-                    levels.length,
+                    levelOrdinal,
+                    totalLevelsHint,
                     level.storyIds,
                 ),
             )
 
-            // If every story in the level failed terminally, abort the
-            // remaining levels — there's likely nothing usable to build
-            // on top of, and dependent levels can't run anyway.
+            // Apply ReplanItem-s buffered during this level (Phase 4).
+            // PRD is mutated, persisted, and the next loop iteration
+            // recomputes the DAG from the updated PRD.
+            if (this.pendingReplans.length > 0) {
+                const drained = this.pendingReplans.splice(0)
+                for (const replan of drained) {
+                    prd = this.applyReplan(prd, replan)
+                    appliedReplans += 1
+                    this.emit(
+                        new ConductorStateItem(
+                            "running_level",
+                            `replan applied (source=${replan.source}, +${replan.addedStories.length}/-${replan.removedStoryIds.length}): ${replan.reason}`,
+                            levelOrdinal,
+                        ),
+                    )
+                }
+                savePrd(this.opts.prdPath, prd)
+            }
+
+            // If every story in the level failed terminally AND no replan
+            // mutated the plan in response, abort the remaining levels.
             const anySuccess = outcomes.some((o) => o.success)
-            if (!anySuccess && outcomes.length > 0) {
+            const replannedThisLevel = appliedReplans > 0
+            if (!anySuccess && outcomes.length > 0 && !replannedThisLevel) {
+                abortedReason =
+                    "all stories in level failed; aborting remaining levels"
                 this.emit(
                     new ConductorStateItem(
                         "failed",
-                        "all stories in level failed; aborting remaining levels",
-                        levelIdx + 1,
-                        levels.length,
+                        abortedReason,
+                        levelOrdinal,
+                        totalLevelsHint,
                     ),
                 )
                 break
@@ -266,6 +299,56 @@ export class Conductor extends Participant {
         }
 
         return summary
+    }
+
+    /**
+     * Apply a ReplanItem to the in-memory PrdFile (returns a new copy):
+     *   - removes stories whose ids are in `removedStoryIds`, *unless*
+     *     they have already passed (we don't roll back commit work);
+     *   - adds new stories from `addedStories`, skipping ids that already
+     *     exist (replans are idempotent on accidental duplicates);
+     *   - rewrites `dependsOn` for stories in `modifiedDeps`.
+     *
+     * This method is pure: persistence is the caller's responsibility.
+     */
+    private applyReplan(prd: PrdFile, replan: ReplanItem): PrdFile {
+        let stories = prd.userStories.slice()
+
+        if (replan.removedStoryIds.length > 0) {
+            const removeSet = new Set(replan.removedStoryIds)
+            stories = stories.filter((s) => !removeSet.has(s.id) || s.passes)
+        }
+
+        if (replan.modifiedDeps.size > 0) {
+            stories = stories.map((s) => {
+                const newDeps = replan.modifiedDeps.get(s.id)
+                if (!newDeps) return s
+                return { ...s, dependsOn: [...newDeps] }
+            })
+        }
+
+        if (replan.addedStories.length > 0) {
+            const existing = new Set(stories.map((s) => s.id))
+            for (const a of replan.addedStories) {
+                if (existing.has(a.id)) continue
+                stories.push({
+                    id: a.id,
+                    priority: a.priority,
+                    title: a.title,
+                    description: a.description,
+                    dependsOn: [...a.dependsOn],
+                    retries: a.retries ?? 2,
+                    acceptance: a.acceptance ? [...a.acceptance] : [],
+                    tests: a.tests ? [...a.tests] : [],
+                    passes: false,
+                    completedAt: null,
+                    durationSecs: null,
+                    model: a.model,
+                })
+            }
+        }
+
+        return { ...prd, userStories: stories }
     }
 
     private async runLevel(
