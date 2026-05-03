@@ -489,17 +489,15 @@ class BaroEventForwarder extends Participant {
         const json = item.toJSON() as { content: Array<{ text: string }> }
         const text = json.content?.[0]?.text ?? ""
         if (!text.trim()) return
-        emit({ type: "story_log", id: agentId, line: text })
+        emitMultiline(agentId, text)
     }
 
     private handleToolCall(source: Participant, item: FunctionCallItem): void {
         const agentId = (source as unknown as { agentId?: string }).agentId
         if (typeof agentId !== "string") return
-        emit({
-            type: "story_log",
-            id: agentId,
-            line: `[tool_call] ${item.name} ${item.args}`,
-        })
+        // Tool args can themselves contain newlines (multi-line file
+        // contents in a Write call, embedded code blocks, etc). Split.
+        emitMultiline(agentId, `[tool_call] ${item.name} ${item.args}`)
     }
 
     private handleToolResult(
@@ -513,11 +511,23 @@ class BaroEventForwarder extends Participant {
             output: Array<{ text: string }>
         }
         const text = json.output?.[0]?.text ?? ""
-        emit({
-            type: "story_log",
-            id: agentId,
-            line: `[tool_result ${json.call_id}] ${text}`,
-        })
+        emitMultiline(agentId, `[tool_result ${json.call_id}] ${text}`)
+    }
+}
+
+/**
+ * Emit a story_log per source line. Keeps the TUI clean (no embedded
+ * `\n` rendered as ⏎ literals) and lets the log scrollbar work as
+ * intended on long tool outputs.
+ */
+function emitMultiline(agentId: string, text: string): void {
+    if (!text) return
+    const lines = text.split("\n")
+    for (const line of lines) {
+        // Skip purely empty trailing lines but keep blank rows mid-block
+        // so structure (e.g. paragraph breaks) survives.
+        if (line.length === 0 && lines.length === 1) continue
+        emit({ type: "story_log", id: agentId, line })
     }
 }
 
