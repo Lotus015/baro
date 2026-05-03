@@ -84,11 +84,15 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Build OpenAI planner bundle
+      - name: Install workspace dependencies
+        # Workspace install (root) — pulls deps for both baro-app and
+        # baro-orchestrator. tsup needs this to resolve cross-workspace
+        # imports when bundling cli.mjs.
+        run: npm install --workspaces --include-workspace-root
+
+      - name: Build npm bundles (openai-planner + Mozaik orchestrator cli.mjs)
         working-directory: packages/baro-app
-        run: |
-          npm install
-          npx tsup src/core/openai-planner.ts --format esm
+        run: npm run build
 
       - name: Sync README from root to npm package
         run: cp README.md packages/baro-app/README.md
