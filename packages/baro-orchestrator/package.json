@@ -10,6 +10,8 @@
     "dev": "tsc -p tsconfig.json --watch",
     "demo:single": "tsx scripts/demo-single-story.ts",
     "demo:multi": "tsx scripts/demo-multi-story.ts",
+    "cli": "tsx scripts/cli.ts",
+    "e2e": "tsx scripts/e2e-test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

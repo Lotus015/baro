@@ -19,6 +19,15 @@ import {
     Participant,
 } from "@mozaik-ai/core"
 
+import {
+    GitGate,
+    createOrCheckoutBranch,
+    getGitFileStats,
+    getHeadSha,
+    gitPushWithRetry,
+    isInsideGitRepo,
+    safePullRebase,
+} from "./git.js"
 import { Auditor } from "./participants/auditor.js"
 import {
     Conductor,
@@ -27,7 +36,7 @@ import {
 } from "./participants/conductor.js"
 import { Operator } from "./participants/operator.js"
 import { StoryResultItem, type StoryAgent } from "./participants/story-agent.js"
-import { loadPrd } from "./prd.js"
+import { PrdFile, loadPrd } from "./prd.js"
 import {
     AgentStateItem,
     ClaudeResultItem,
@@ -49,6 +58,12 @@ export interface OrchestrateConfig {
      * Default: true.
      */
     emitTuiEvents?: boolean
+    /**
+     * Whether to perform git lifecycle operations (branch create, push,
+     * pull --rebase between stories). If undefined, auto-detected from
+     * whether `cwd` is a git working tree.
+     */
+    withGit?: boolean
     /** Hooks for receiving Operator commands externally (Rust TUI). */
     operatorHooks?: {
         onAbort?: (storyId: string) => void
@@ -90,6 +105,10 @@ export async function orchestrate(
     operator.setEnvironment(env)
     operator.join(env)
 
+    const useGit = config.withGit ?? (await isInsideGitRepo(config.cwd))
+    const gitGate = new GitGate()
+    let baseSha: string | null = null
+
     // Conductor — the work driver.
     const conductor = new Conductor({
         prdPath: config.prdPath,
@@ -98,6 +117,50 @@ export async function orchestrate(
         timeoutSecs: config.timeoutSecs ?? 600,
         overrideModel: config.overrideModel ?? undefined,
         defaultModel: config.defaultModel ?? "sonnet",
+        onRunStart: useGit
+            ? async (prd) => {
+                  baseSha = await getHeadSha(config.cwd)
+                  if (prd.branchName) {
+                      await createOrCheckoutBranch(
+                          config.cwd,
+                          prd.branchName,
+                          (line) => emitTui && emit({ type: "story_log", id: "_git", line }),
+                      )
+                  }
+              }
+            : undefined,
+        onStoryPassed: useGit
+            ? async (storyId) => {
+                  await safePullRebase(config.cwd, (line) =>
+                      emitTui && emit({ type: "story_log", id: storyId, line }),
+                  )
+                  try {
+                      await gitPushWithRetry(gitGate, {
+                          cwd: config.cwd,
+                          onLog: (line) =>
+                              emitTui &&
+                              emit({ type: "story_log", id: storyId, line }),
+                      })
+                      if (emitTui) {
+                          emit({
+                              type: "push_status",
+                              id: storyId,
+                              success: true,
+                              error: null,
+                          })
+                      }
+                  } catch (e) {
+                      if (emitTui) {
+                          emit({
+                              type: "push_status",
+                              id: storyId,
+                              success: false,
+                              error: (e as Error)?.message ?? String(e),
+                          })
+                      }
+                  }
+              }
+            : undefined,
     })
     conductor.join(env)
 
@@ -118,6 +181,14 @@ export async function orchestrate(
 
     const summary = await conductor.run(env)
 
+    let filesCreated = 0
+    let filesModified = 0
+    if (useGit && baseSha) {
+        const stats = await getGitFileStats(config.cwd, baseSha)
+        filesCreated = stats.created
+        filesModified = stats.modified
+    }
+
     if (emitTui) {
         emit({
             type: "done",
@@ -126,8 +197,8 @@ export async function orchestrate(
                 storiesCompleted: summary.completedStories.length,
                 storiesSkipped: 0,
                 totalCommits: 0,
-                filesCreated: 0,
-                filesModified: 0,
+                filesCreated,
+                filesModified,
             },
         })
     }

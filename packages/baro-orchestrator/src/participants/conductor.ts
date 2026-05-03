@@ -50,6 +50,24 @@ export interface ConductorOptions {
     contextContent?: string
     /** Optional path-builder for per-story prompt template overrides. */
     promptTemplatePath?: string
+    /**
+     * Optional callback fired after each story passes. Used by callers
+     * to tack on side-effects like git push or file-stat capture.
+     * Errors thrown here become non-fatal warnings.
+     */
+    onStoryPassed?: (storyId: string) => Promise<void> | void
+    /**
+     * Optional callback fired before any story runs (after PRD load).
+     * Useful for setting up git branches.
+     */
+    onRunStart?: (prd: PrdFile) => Promise<void> | void
+    /**
+     * Optional callback fired after the entire run completes
+     * (regardless of success).
+     */
+    onRunComplete?: (
+        summary: ConductorRunSummary,
+    ) => Promise<void> | void
 }
 
 export interface ConductorRunSummary {
@@ -113,6 +131,20 @@ export class Conductor extends Participant {
         let prd = loadPrd(this.opts.prdPath)
         this.emit(new ConductorStateItem("loading", `${prd.userStories.length} stories`))
 
+        if (this.opts.onRunStart) {
+            try {
+                await this.opts.onRunStart(prd)
+            } catch (e) {
+                this.emit(
+                    new ConductorStateItem(
+                        "failed",
+                        `onRunStart hook failed: ${(e as Error)?.message ?? String(e)}`,
+                    ),
+                )
+                throw e
+            }
+        }
+
         const levels = buildDag(prd.userStories, { onlyIncomplete: true })
         if (levels.length === 0) {
             this.emit(new ConductorStateItem("done", "nothing to do"))
@@ -148,6 +180,20 @@ export class Conductor extends Participant {
                     completed.push(outcome.storyId)
                     prd = markStoryPassed(prd, outcome.storyId, outcome.durationSecs)
                     savePrd(this.opts.prdPath, prd)
+                    if (this.opts.onStoryPassed) {
+                        try {
+                            await this.opts.onStoryPassed(outcome.storyId)
+                        } catch (e) {
+                            this.emit(
+                                new ConductorStateItem(
+                                    "running_level",
+                                    `onStoryPassed hook for ${outcome.storyId} failed: ${(e as Error)?.message ?? String(e)}`,
+                                    levelIdx + 1,
+                                    levels.length,
+                                ),
+                            )
+                        }
+                    }
                 } else {
                     failed.push(outcome.storyId)
                 }
@@ -189,12 +235,27 @@ export class Conductor extends Participant {
             ),
         )
 
-        return {
+        const summary: ConductorRunSummary = {
             completedStories: completed,
             failedStories: failed,
             totalDurationSecs,
             totalAttempts,
         }
+
+        if (this.opts.onRunComplete) {
+            try {
+                await this.opts.onRunComplete(summary)
+            } catch (e) {
+                this.emit(
+                    new ConductorStateItem(
+                        "failed",
+                        `onRunComplete hook failed: ${(e as Error)?.message ?? String(e)}`,
+                    ),
+                )
+            }
+        }
+
+        return summary
     }
 
     private async runLevel(

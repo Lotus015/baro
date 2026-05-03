@@ -65,3 +65,35 @@ export {
     type DagLevel,
     type BuildOptions as DagBuildOptions,
 } from "./dag.js"
+
+export {
+    GitGate,
+    createOrCheckoutBranch,
+    getCurrentBranch,
+    getGitFileStats,
+    getHeadSha,
+    gitPushWithRetry,
+    isInsideGitRepo,
+    safePullRebase,
+    type GitFileStats,
+    type GitPushOptions,
+} from "./git.js"
+
+export {
+    orchestrate,
+    type OrchestrateConfig,
+    type OrchestrateResult,
+} from "./orchestrate.js"
+
+export {
+    emit as emitBaroEvent,
+    subscribeCommands as subscribeTuiCommands,
+    type BaroEvent,
+    type BaroCommand,
+} from "./tui-protocol.js"
+
+export {
+    Operator,
+    type OperatorCommand,
+    type OperatorHooks,
+} from "./participants/operator.js"
