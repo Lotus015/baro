@@ -6,13 +6,21 @@
  *   idle ─► starting ─► running ─► done | failed
  *                               ╰► retrying ─► running ─► …
  *
- * Each attempt spawns a fresh ClaudeCliParticipant. On `result:success`
- * (no error, exit 0) the StoryAgent emits a StoryResultItem and resolves
- * its `done` promise. On Claude failure or timeout, retry up to
- * `retries` times before giving up.
+ * Multi-turn lifecycle (per attempt):
+ *   1. Claude process starts; the initial prompt is written to stdin.
+ *   2. Stdin stays OPEN so further user messages can be injected.
+ *   3. A quiet timer (quietTimeoutMs, default 2 000 ms) starts after the
+ *      first ClaudeResultItem arrives for this story. It resets whenever
+ *      another ClaudeResultItem arrives or whenever an AgentTargetedMessageItem
+ *      addressed to this story is forwarded to Claude stdin.
+ *   4. Stdin is closed (ending the turn stream) when EITHER:
+ *      (a) the quiet timer fires — Claude has been silent for quietTimeoutMs, or
+ *      (b) maxTurns ClaudeResultItems have been observed for this agentId.
+ *   5. A per-story hard timeout (hardTimeoutSecs, default 300 s) caps the
+ *      entire story across all attempts, aborting Claude unconditionally.
  *
- * Library-grade: doesn't import PRD types. Caller passes a StorySpec
- * with prompt + acceptance criteria + retry budget.
+ * Single-turn stories work unchanged: the quiet timer fires 2 s after the
+ * lone result event, closeStdin() is called, and claude.done resolves normally.
  */
 
 import { setTimeout as setTimeoutPromise } from "timers/promises"
@@ -49,6 +57,21 @@ export interface StorySpec {
     timeoutSecs?: number
     /** Delay between retries in milliseconds. Default: 1500. */
     retryDelayMs?: number
+    /**
+     * Milliseconds of silence (no ClaudeResultItem for this story) after which
+     * stdin is closed to end the multi-turn session. Default: 2000.
+     */
+    quietTimeoutMs?: number
+    /**
+     * Maximum number of ClaudeResultItem events (turns) to observe before
+     * closing stdin unconditionally. Default: 4.
+     */
+    maxTurns?: number
+    /**
+     * Hard cap in seconds for the entire story across all attempts. The
+     * Claude process is aborted unconditionally when this fires. Default: 300.
+     */
+    hardTimeoutSecs?: number
 }
 
 export interface StoryOutcome {
@@ -87,7 +110,15 @@ export class StoryResultItem extends ContextItem {
 
 export class StoryAgent extends Participant {
     private readonly spec: Required<
-        Pick<StorySpec, "retries" | "timeoutSecs" | "retryDelayMs">
+        Pick<
+            StorySpec,
+            | "retries"
+            | "timeoutSecs"
+            | "retryDelayMs"
+            | "quietTimeoutMs"
+            | "maxTurns"
+            | "hardTimeoutSecs"
+        >
     > &
         StorySpec
 
@@ -98,12 +129,20 @@ export class StoryAgent extends Participant {
     private resolveDone!: (outcome: StoryOutcome) => void
     public readonly done: Promise<StoryOutcome>
 
+    // Callbacks wired up during an attempt's multi-turn lifecycle.
+    // Nulled out when the attempt ends.
+    private notifyStoryResult: (() => void) | null = null
+    private notifyStoryMessage: (() => void) | null = null
+
     constructor(spec: StorySpec) {
         super()
         this.spec = {
             retries: 2,
             timeoutSecs: 600,
             retryDelayMs: 1500,
+            quietTimeoutMs: 2000,
+            maxTurns: 4,
+            hardTimeoutSecs: 300,
             ...spec,
         }
         this.done = new Promise<StoryOutcome>((res) => {
@@ -145,16 +184,25 @@ export class StoryAgent extends Participant {
 
     /**
      * Forward bus messages targeted at this story to its current Claude
-     * process. Critic/Librarian/etc inject feedback this way.
+     * process. Resets the multi-turn quiet timer on both result and message
+     * events so the session stays open while activity is ongoing.
+     *
+     * StoryAgent is the sole owner of AgentTargetedMessageItem → stdin
+     * forwarding. ClaudeCliParticipant.onContextItem does NOT do this.
      */
     async onContextItem(source: Participant, item: ContextItem): Promise<void> {
         if (source === this) return
-        if (item instanceof AgentTargetedMessageItem) {
-            if (item.recipientId !== this.spec.id) return
-            const claude = this.currentClaude
-            if (claude && claude.getPhase() === "running") {
-                claude.sendUserMessage(item.text)
-            }
+
+        // StoryAgent observes AgentTargetedMessageItem and ClaudeResultItem
+        // for lifecycle/timing purposes only. The actual stdin forwarding
+        // is owned by ClaudeCliParticipant.onContextItem to avoid
+        // double-delivery.
+        if (item instanceof AgentTargetedMessageItem && item.recipientId === this.spec.id) {
+            this.notifyStoryMessage?.()
+        }
+
+        if (item instanceof ClaudeResultItem && item.agentId === this.spec.id) {
+            this.notifyStoryResult?.()
         }
     }
 
@@ -168,36 +216,60 @@ export class StoryAgent extends Participant {
         const maxAttempts = this.spec.retries + 1
         let lastSummary: ClaudeRunSummary | null = null
         let lastError: string | null = null
+        let hardTimedOut = false
 
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            if (attempt > 1) {
-                this.transition(
-                    "waiting",
-                    `retrying (attempt ${attempt}/${maxAttempts})`,
-                )
-                await setTimeoutPromise(this.spec.retryDelayMs)
+        const hardTimer = setTimeout(() => {
+            hardTimedOut = true
+            this.currentClaude?.abort()
+        }, this.spec.hardTimeoutSecs * 1000)
+
+        try {
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                if (hardTimedOut) {
+                    lastError = `hard timeout after ${this.spec.hardTimeoutSecs}s`
+                    break
+                }
+
+                if (attempt > 1) {
+                    this.transition(
+                        "waiting",
+                        `retrying (attempt ${attempt}/${maxAttempts})`,
+                    )
+                    await setTimeoutPromise(this.spec.retryDelayMs)
+                    if (hardTimedOut) {
+                        lastError = `hard timeout after ${this.spec.hardTimeoutSecs}s`
+                        break
+                    }
+                }
+
+                const result = await this.runOneAttempt(attempt)
+                lastSummary = result.summary
+                lastError = result.error
+
+                if (result.success) {
+                    const durationSecs = Math.round(
+                        (Date.now() - (this.startedAt ?? Date.now())) / 1000,
+                    )
+                    this.transition("done", `success on attempt ${attempt}`)
+                    this.emitStoryResult(true, attempt, durationSecs, null)
+                    this.resolveDone({
+                        storyId: this.spec.id,
+                        success: true,
+                        attempts: attempt,
+                        durationSecs,
+                        finalSummary: result.summary,
+                        error: null,
+                    })
+                    return
+                }
+
+                if (hardTimedOut) {
+                    lastError = `hard timeout after ${this.spec.hardTimeoutSecs}s`
+                    break
+                }
             }
-
-            const result = await this.runOneAttempt(attempt)
-            lastSummary = result.summary
-            lastError = result.error
-
-            if (result.success) {
-                const durationSecs = Math.round(
-                    (Date.now() - (this.startedAt ?? Date.now())) / 1000,
-                )
-                this.transition("done", `success on attempt ${attempt}`)
-                this.emitStoryResult(true, attempt, durationSecs, null)
-                this.resolveDone({
-                    storyId: this.spec.id,
-                    success: true,
-                    attempts: attempt,
-                    durationSecs,
-                    finalSummary: result.summary,
-                    error: null,
-                })
-                return
-            }
+        } finally {
+            clearTimeout(hardTimer)
         }
 
         const durationSecs = Math.round(
@@ -238,7 +310,7 @@ export class StoryAgent extends Participant {
         // deadlock — send the prompt up front, then await events.
         try {
             claude.sendUserMessage(this.spec.prompt)
-            claude.closeStdin()
+            // stdin stays open — multi-turn lifecycle closes it
         } catch (e) {
             const error = e instanceof Error ? e.message : String(e)
             claude.abort()
@@ -246,6 +318,8 @@ export class StoryAgent extends Participant {
             this.currentClaude = null
             return { success: false, summary: null, error }
         }
+
+        const cancelMultiTurn = this.setupMultiTurnLifecycle(claude)
 
         let summary: ClaudeRunSummary
         try {
@@ -255,6 +329,7 @@ export class StoryAgent extends Participant {
                 `attempt ${attempt} timeout after ${this.spec.timeoutSecs}s`,
             )
         } catch (e) {
+            cancelMultiTurn()
             claude.abort()
             const error = e instanceof Error ? e.message : String(e)
             // Wait for the kill to land so subsequent attempts get a clean slate.
@@ -268,6 +343,7 @@ export class StoryAgent extends Participant {
             return { success: false, summary: null, error }
         }
 
+        cancelMultiTurn()
         claude.leave(this.envRef)
         this.currentClaude = null
 
@@ -287,6 +363,55 @@ export class StoryAgent extends Participant {
         }
 
         return { success: true, summary, error: null }
+    }
+
+    /**
+     * Wires up the multi-turn quiet timer and turn counter for one attempt.
+     * Returns a cancel function that stops the timer and clears callbacks
+     * without closing stdin (used when aborting due to timeout/error).
+     */
+    private setupMultiTurnLifecycle(claude: ClaudeCliParticipant): () => void {
+        let turnsObserved = 0
+        let quietTimer: ReturnType<typeof setTimeout> | null = null
+        let finished = false
+
+        const finish = () => {
+            if (finished) return
+            finished = true
+            if (quietTimer) { clearTimeout(quietTimer); quietTimer = null }
+            this.notifyStoryResult = null
+            this.notifyStoryMessage = null
+            claude.closeStdin()
+        }
+
+        const resetQuietTimer = () => {
+            if (quietTimer) clearTimeout(quietTimer)
+            quietTimer = setTimeout(finish, this.spec.quietTimeoutMs)
+        }
+
+        this.notifyStoryResult = () => {
+            turnsObserved++
+            if (turnsObserved >= this.spec.maxTurns) {
+                finish()
+            } else {
+                resetQuietTimer()
+            }
+        }
+
+        // Reset the timer when a message is injected, but only once the
+        // first result has arrived (timer already started).
+        this.notifyStoryMessage = () => {
+            if (quietTimer !== null) resetQuietTimer()
+        }
+
+        return () => {
+            if (finished) return
+            finished = true
+            if (quietTimer) { clearTimeout(quietTimer); quietTimer = null }
+            this.notifyStoryResult = null
+            this.notifyStoryMessage = null
+            // Caller is responsible for aborting the process.
+        }
     }
 
     private emitStoryResult(

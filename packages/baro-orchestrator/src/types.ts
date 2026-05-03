@@ -265,6 +265,43 @@ export class ClaudeRateLimitItem extends ContextItem {
 }
 
 /**
+ * Verdict emitted by the Critic participant after evaluating a story
+ * agent's output. Snake_case keys in toJSON() match the Rust BaroEnum
+ * wire format.
+ */
+export class CritiqueItem extends ContextItem {
+    readonly type = "critique"
+
+    constructor(
+        /** ID of the story agent whose output was evaluated. */
+        public readonly agentId: string,
+        public readonly verdict: "pass" | "fail",
+        /** Full reasoning text returned by the Critic LLM. */
+        public readonly reasoning: string,
+        /** Acceptance criteria strings that were violated (empty on pass). */
+        public readonly violatedCriteria: readonly string[],
+        /** Which Claude turn the Critic evaluated. */
+        public readonly turn: number,
+        /** Model ID used by the Critic LLM call. */
+        public readonly modelUsed: string,
+    ) {
+        super()
+    }
+
+    toJSON(): unknown {
+        return {
+            type: this.type,
+            agent_id: this.agentId,
+            verdict: this.verdict,
+            reasoning: this.reasoning,
+            violated_criteria: this.violatedCriteria,
+            turn: this.turn,
+            model_used: this.modelUsed,
+        }
+    }
+}
+
+/**
  * Fallback for any Claude stream-json event whose `type` we don't yet
  * recognize. Lets us forward-compatibly carry events without dropping
  * them; observers can still inspect them.

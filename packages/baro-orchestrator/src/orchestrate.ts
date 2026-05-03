@@ -34,6 +34,7 @@ import {
     ConductorRunSummary,
     ConductorStateItem,
 } from "./participants/conductor.js"
+import { Critic } from "./participants/critic.js"
 import { Librarian } from "./participants/librarian.js"
 import { Operator } from "./participants/operator.js"
 import { Sentry } from "./participants/sentry.js"
@@ -44,6 +45,7 @@ import {
     ClaudeResultItem,
     ClaudeSystemItem,
     CoordinationItem,
+    CritiqueItem,
 } from "./types.js"
 import { emit } from "./tui-protocol.js"
 
@@ -80,6 +82,20 @@ export interface OrchestrateConfig {
      * CoordinationItem warnings on the bus. Default: true.
      */
     withSentry?: boolean
+    /**
+     * Whether to wire the Critic (live acceptance-criteria evaluator).
+     * When on, each story agent's output is evaluated against its
+     * acceptance criteria via a `claude --model haiku` subprocess. Auth
+     * comes through the Claude CLI's existing config — no API key needed.
+     * Default: false (opt-in).
+     */
+    withCritic?: boolean
+    /**
+     * Model passed to the Critic when withCritic is on. Default: "haiku".
+     * Use any alias `claude --model` accepts ("haiku", "sonnet", "opus")
+     * or a fully qualified ID.
+     */
+    criticModel?: string
     /** Hooks for receiving Operator commands externally (Rust TUI). */
     operatorHooks?: {
         onAbort?: (storyId: string) => void
@@ -134,6 +150,24 @@ export async function orchestrate(
     const sentry = useSentry ? new Sentry() : null
     if (librarian) librarian.join(env)
     if (sentry) sentry.join(env)
+
+    // Phase-3 observer — Critic (live acceptance-criteria evaluator).
+    // Opt-in (default OFF). Spawns `claude --model haiku` subprocesses
+    // for each evaluation, inheriting Claude CLI auth.
+    let critic: Critic | null = null
+    if (config.withCritic) {
+        const prd = loadPrd(config.prdPath)
+        const targets = new Map<string, readonly string[]>(
+            prd.userStories
+                .filter((s) => s.acceptance && s.acceptance.length > 0)
+                .map((s) => [s.id, s.acceptance] as [string, readonly string[]]),
+        )
+        critic = new Critic({
+            targets,
+            model: config.criticModel ?? "haiku",
+        })
+        critic.join(env)
+    }
 
     // Conductor — the work driver.
     const conductor = new Conductor({
@@ -217,6 +251,10 @@ export async function orchestrate(
     }
 
     const summary = await conductor.run(env)
+
+    // Drain in-flight Critic evaluations so the audit log and any
+    // CritiqueItem-emitted side effects land before this function returns.
+    if (critic) await critic.idle()
 
     let filesCreated = 0
     let filesModified = 0
@@ -306,6 +344,11 @@ class BaroEventForwarder extends Participant {
             this.handleCoordination(item)
             return
         }
+
+        if (item instanceof CritiqueItem) {
+            this.handleCritique(item)
+            return
+        }
     }
 
     private handleCoordination(item: CoordinationItem): void {
@@ -313,6 +356,14 @@ class BaroEventForwarder extends Participant {
             type: "story_log",
             id: item.recipientId,
             line: `[sentry/${item.kind}] ${item.reason}`,
+        })
+    }
+
+    private handleCritique(item: CritiqueItem): void {
+        emit({
+            type: "story_log",
+            id: item.agentId,
+            line: `[critic/${item.verdict}] ${item.reasoning}`,
         })
     }
 
